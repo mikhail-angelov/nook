@@ -292,23 +292,6 @@ export function ChatPanel({
     return nextDraft.id;
   }
 
-  async function ensureProviderForSend() {
-    const resolved = provider ?? (await resolveAndCacheProvider(providerId));
-    if (resolved) {
-      setProvider(resolved);
-      return resolved;
-    }
-    const apiKey = await requestApiKey(providerId);
-    if (!apiKey) {
-      return null;
-    }
-    const retry = await resolveAndCacheProvider(providerId);
-    if (retry) {
-      setProvider(retry);
-    }
-    return retry;
-  }
-
   async function handleSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = draft.trim();
@@ -320,10 +303,13 @@ export function ChatPanel({
     if (!sessionId || !vaultRoot) {
       return;
     }
-    const resolvedProvider = await ensureProviderForSend();
+    const resolvedProvider = await resolveAndCacheProvider(providerId);
     if (!resolvedProvider) {
       setStatus(`No ${providerId} API key available.`);
       return;
+    }
+    if (resolvedProvider !== provider) {
+      setProvider(resolvedProvider);
     }
 
     setSending(true);
@@ -342,13 +328,8 @@ export function ChatPanel({
     setDraft("");
 
     try {
-      const activeSystemPrompt =
-        activeSessionId === draftSession.id
-          ? draftSession.systemPrompt
-          : activeSession?.systemPrompt ?? "";
-      const system = buildSystemPrompt(activeSystemPrompt, attachedNotes);
-      const tokenBudget = resolvedProvider.contextWindow(model);
-      if (system && tokenBudget > 0 && approximateTokens(system) > tokenBudget * 0.7) {
+      const system = systemPrompt;
+      if (system && promptNearLimit) {
         setStatus("Attached notes may exceed 70% of the model context window.");
       }
 
@@ -441,16 +422,23 @@ export function ChatPanel({
   }
 
   const activeMessageCount = messages.length;
-  const activeSystemPrompt =
-    activeSessionId === draftSession.id
-      ? draftSession.systemPrompt
-      : activeSession?.systemPrompt ?? "";
-  const promptNearLimit =
-    buildSystemPrompt(activeSystemPrompt, attachedNotes).trim().length > 0 &&
-    provider &&
-    provider.contextWindow(model) > 0 &&
-    approximateTokens(buildSystemPrompt(activeSystemPrompt, attachedNotes)) >
-      provider.contextWindow(model) * 0.7;
+  const activeSystemPrompt = useMemo(
+    () =>
+      activeSessionId === draftSession.id
+        ? draftSession.systemPrompt
+        : activeSession?.systemPrompt ?? "",
+    [activeSessionId, draftSession.id, draftSession.systemPrompt, activeSession?.systemPrompt],
+  );
+  const systemPrompt = useMemo(
+    () => buildSystemPrompt(activeSystemPrompt, attachedNotes),
+    [activeSystemPrompt, attachedNotes],
+  );
+  const promptNearLimit = useMemo(() => {
+    if (!provider || !systemPrompt.trim()) return false;
+    const budget = provider.contextWindow(model);
+    if (budget <= 0) return false;
+    return approximateTokens(systemPrompt) > budget * 0.7;
+  }, [model, provider, systemPrompt]);
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col border-l border-border bg-background">

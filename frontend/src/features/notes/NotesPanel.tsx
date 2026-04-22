@@ -6,13 +6,13 @@ import {
   makeNoteSecure,
   loadNote,
   noteToScanned,
+  scannedToNote,
   renameNote,
   saveNote,
   type Note,
 } from "@/features/vault/notes";
 import {
   removeSearchNote,
-  searchNotes,
   upsertSearchNote,
 } from "@/features/search/search";
 import { vaultUnlockSecure } from "@/features/vault/api";
@@ -20,8 +20,11 @@ import { useAutosave } from "@/features/editor/useAutosave";
 import { useNoteBuffer } from "@/features/editor/useNoteBuffer";
 import { Editor } from "@/features/editor/Editor";
 import { PromptApi } from "@/components/PromptDialog";
-import { ScannedNote } from "../vault/types";
+import { ScannedNote, VaultEvent } from "../vault/types";
 import { TreeView, type TreeNode } from "./TreeView";
+import { resolveSelectedNoteId } from "./selection";
+import { useSelectedNoteLoader } from "./useSelectedNoteLoader";
+import { resolveVisibleNotes } from "./visibleNotes";
 
 type NotesPanelProps = {
   root: string | null;
@@ -31,6 +34,7 @@ type NotesPanelProps = {
   upsertNote: (note: ScannedNote) => void;
   removeNote: (id: string) => void;
   openVault: () => Promise<void>;
+  vaultEvent: VaultEvent | null;
 };
 
 function toScannedNote(note: Note): ScannedNote {
@@ -90,18 +94,19 @@ export function NotesPanel({
   root,
   promptApi,
   noteMap,
+  status: parentStatus,
   upsertNote,
   removeNote,
   openVault,
+  vaultEvent,
 }: NotesPanelProps) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [activeNote, setActiveNote] = useState<Note | null>(null);
+  const [requestedSelectedId, setRequestedSelectedId] = useState<string | null>(
+    null,
+  );
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchIds, setSearchIds] = useState<string[] | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [secureUnlocked, setSecureUnlocked] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const noteBuffer = useNoteBuffer(activeNote, root);
 
   const focusGlobalSearch = useCallback((selection: string) => {
     const input = searchInputRef.current;
@@ -133,20 +138,19 @@ export function NotesPanel({
     () => Array.from(noteMap.values()).sort(sortNotes),
     [noteMap],
   );
-
-  const visibleNotes = useMemo(() => {
-    if (!searchIds) {
-      return notes;
-    }
-    const ids = new Set(searchIds);
-    return notes.filter((note) => ids.has(note.id));
-  }, [notes, searchIds]);
+  const selectedId = useMemo(
+    () => resolveSelectedNoteId(notes, requestedSelectedId),
+    [notes, requestedSelectedId],
+  );
+  const visibleNotes = useMemo(
+    () => resolveVisibleNotes(notes, searchQuery),
+    [notes, searchQuery],
+  );
 
   const selectedStoreNote = useMemo(
     () => notes.find((note) => note.id === selectedId) ?? null,
     [notes, selectedId],
   );
-  const title = activeNote?.title ?? selectedStoreNote?.title ?? null;
   const unlockSecureVault = useCallback(
     async (vaultRoot: string) => {
       const password = await promptApi.prompt("Vault password", {
@@ -168,23 +172,60 @@ export function NotesPanel({
           const unlocked = await unlockSecureVault(vaultRoot);
           if (!unlocked) return null;
         }
-        const fresh = await loadNote(noteId, vaultRoot);
-        if (fresh) {
-          setActiveNote(fresh);
-          upsertNote(toScannedNote(fresh));
-        } else {
-          setActiveNote(null);
-        }
+        const fresh = await loadNote(
+          noteId,
+          vaultRoot,
+          noteMeta
+            ? {
+                mtime: noteMeta.mtime,
+                createdAt: noteMeta.created_at,
+              }
+            : undefined,
+        );
         return fresh;
       } catch (error) {
         setStatus(
           error instanceof Error ? error.message : "Failed to load note",
         );
-        setActiveNote(null);
         return null;
       }
     },
-    [notes, secureUnlocked, setStatus, unlockSecureVault, upsertNote],
+    [notes, secureUnlocked, setStatus, unlockSecureVault],
+  );
+  const { loadedNote, setLoadedNote } = useSelectedNoteLoader({
+    root,
+    selectedId,
+    loadSelectedNote,
+  });
+  const activeNote = useMemo(() => {
+    if (loadedNote && loadedNote.id === selectedStoreNote?.id) {
+      return loadedNote;
+    }
+    return selectedStoreNote ? scannedToNote(selectedStoreNote) : null;
+  }, [loadedNote, selectedStoreNote]);
+  const noteBuffer = useNoteBuffer(activeNote, root, vaultEvent);
+  const title = activeNote?.title ?? selectedStoreNote?.title ?? null;
+  const commitNote = useCallback(
+    (
+      note: Note,
+      options?: {
+        previousId?: string;
+        select?: boolean;
+      },
+    ) => {
+      if (options?.previousId && options.previousId !== note.id) {
+        removeNote(options.previousId);
+        removeSearchNote(options.previousId);
+      }
+      const stored = toScannedNote(note);
+      upsertSearchNote(stored);
+      upsertNote(stored);
+      if (options?.select !== false) {
+        setRequestedSelectedId(note.id);
+      }
+      setLoadedNote(note);
+    },
+    [removeNote, setLoadedNote, upsertNote],
   );
   const autosave = useAutosave({
     note: activeNote,
@@ -195,77 +236,31 @@ export function NotesPanel({
         if (!vaultRoot) return;
         const saved = await saveNote(noteId, vaultRoot, body);
         if (!saved) return;
-        const stored = toScannedNote(saved);
-        upsertSearchNote(stored);
-        upsertNote(stored);
-        setActiveNote(saved);
+        commitNote(saved, { select: selectedId === noteId });
         noteBuffer.markSaved(body);
       },
-      [noteBuffer, upsertNote],
+      [commitNote, noteBuffer, selectedId],
     ),
   });
   const refreshActiveNote = useCallback(
     async (noteId: string, vaultRoot: string | null) => {
-      return loadSelectedNote(noteId, vaultRoot);
+      const fresh = await loadSelectedNote(noteId, vaultRoot);
+      setLoadedNote(fresh);
+      return fresh;
     },
-    [loadSelectedNote],
+    [loadSelectedNote, setLoadedNote],
   );
 
   const selectNote = useCallback(
     async (noteId: string) => {
       if (!root) return;
-      setSelectedId(noteId);
+      setRequestedSelectedId(noteId);
+      if (loadedNote?.id !== noteId) {
+        setLoadedNote(null);
+      }
     },
-    [root],
+    [loadedNote?.id, root, setLoadedNote],
   );
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!searchQuery.trim()) {
-      setSearchIds(null);
-      return;
-    }
-    void (async () => {
-      const results = await searchNotes(searchQuery, 50);
-      if (!cancelled) {
-        setSearchIds(results.map((result) => result.id));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [notes, searchQuery]);
-
-  useEffect(() => {
-    if (!root) return;
-    if (selectedId && notes.some((note) => note.id === selectedId)) return;
-    const first = notes[0];
-    if (first) {
-      setSelectedId(first.id);
-    }
-  }, [notes, root, selectedId]);
-
-
-    useEffect(() => {
-      if (!root || !selectedId) {
-        setActiveNote(null);
-        return;
-      }
-      if (activeNote?.id === selectedId) {
-        return;
-      }
-      let cancelled = false;
-      void (async () => {
-        const fresh = await loadSelectedNote(selectedId, root);
-        if (cancelled) return;
-        if (!fresh) {
-          setActiveNote(null);
-        }
-      })();
-      return () => {
-        cancelled = true;
-      };
-    }, [activeNote?.id, loadSelectedNote, root, selectedId]);
 
   const createVaultNote = useCallback(async () => {
     if (!root) return;
@@ -275,32 +270,18 @@ export function NotesPanel({
     if (!relPath) return;
     await autosave.flush();
     const note = await createNote(root, relPath, "");
-    const stored = toScannedNote(note);
-    upsertSearchNote(stored);
-    upsertNote(stored);
-    setSelectedId(note.id);
-    setActiveNote(note);
-  }, [autosave, promptApi, root, upsertNote]);
+    commitNote(note);
+  }, [autosave, commitNote, promptApi, root]);
 
-  const createVaultFolder = useCallback(async () => {
-    if (!root) return;
-    const folderPath = await promptApi.prompt("Create folder", {
-      defaultValue: "notes/new-folder",
-    });
-    if (!folderPath) return;
-    
-    // Ensure the folder path ends with a slash for consistency
-    const normalizedPath = folderPath.endsWith('/') ? folderPath : folderPath + '/';
-    
-    // Create an empty note with .md extension to represent the folder
-    // In a real implementation, we would create an actual directory
-    const note = await createNote(root, normalizedPath + ".folder.md", "# Folder\n\nThis is a folder placeholder.");
-    const stored = toScannedNote(note);
-    upsertSearchNote(stored);
-    upsertNote(stored);
-    setSelectedId(note.id);
-    setActiveNote(note);
-  }, [autosave, promptApi, root, upsertNote]);
+  const performRename = useCallback(
+    async (oldId: string, newPath: string) => {
+      if (!root) return;
+      await autosave.flush();
+      const renamed = await renameNote(oldId, newPath, root);
+      commitNote(renamed, { previousId: oldId });
+    },
+    [autosave, commitNote, root],
+  );
 
   const renameSelectedNote = useCallback(async () => {
     if (!root || !activeNote) return;
@@ -308,16 +289,8 @@ export function NotesPanel({
       defaultValue: activeNote.id,
     });
     if (!nextPath || nextPath === activeNote.id) return;
-    await autosave.flush();
-    const renamed = await renameNote(activeNote.id, nextPath, root);
-    removeNote(activeNote.id);
-    removeSearchNote(activeNote.id);
-    const stored = toScannedNote(renamed);
-    upsertSearchNote(stored);
-    upsertNote(stored);
-    setSelectedId(renamed.id);
-    setActiveNote(renamed);
-  }, [activeNote, autosave, promptApi, removeNote, root, upsertNote]);
+    await performRename(activeNote.id, nextPath);
+  }, [activeNote, performRename, promptApi, root]);
 
   const makeSelectedNoteSecure = useCallback(async () => {
     if (!root || !activeNote) return;
@@ -331,22 +304,15 @@ export function NotesPanel({
       root,
       noteBuffer.draft ?? activeNote.body ?? "",
     );
-    removeNote(activeNote.id);
-    removeSearchNote(activeNote.id);
-    const stored = toScannedNote(secured);
-    upsertSearchNote(stored);
-    upsertNote(stored);
-    setSelectedId(secured.id);
-    setActiveNote(secured);
+    commitNote(secured, { previousId: activeNote.id });
   }, [
     activeNote,
     autosave,
+    commitNote,
     noteBuffer.draft,
-    removeNote,
     root,
     secureUnlocked,
     unlockSecureVault,
-    upsertNote,
   ]);
 
   const deleteSelectedNote = useCallback(async () => {
@@ -358,9 +324,9 @@ export function NotesPanel({
     removeNote(activeNote.id);
     removeSearchNote(activeNote.id);
     const next = notes.find((note) => note.id !== activeNote.id) ?? null;
-    setSelectedId(next?.id ?? null);
-    setActiveNote(null);
-  }, [activeNote, autosave, notes, promptApi, removeNote, root]);
+    setRequestedSelectedId(next?.id ?? null);
+    setLoadedNote(null);
+  }, [activeNote, autosave, notes, promptApi, removeNote, root, setLoadedNote]);
 
   const reloadSelectedNote = useCallback(async () => {
     if (!root || !activeNote) return;
@@ -397,25 +363,16 @@ export function NotesPanel({
       setEditingNoteId(null);
       return;
     }
-
     try {
-      await autosave.flush();
-      const renamed = await renameNote(editingNoteId, editingName, root);
-      removeNote(editingNoteId);
-      removeSearchNote(editingNoteId);
-      const stored = toScannedNote(renamed);
-      upsertSearchNote(stored);
-      upsertNote(stored);
-      setSelectedId(renamed.id);
-      setActiveNote(renamed);
+      await performRename(editingNoteId, editingName);
     } catch (error) {
       setStatus(
-        error instanceof Error ? error.message : "Failed to rename note"
+        error instanceof Error ? error.message : "Failed to rename note",
       );
     } finally {
       setEditingNoteId(null);
     }
-  }, [editingNoteId, editingName, root, autosave, removeNote, removeSearchNote, upsertSearchNote, upsertNote]);
+  }, [editingName, editingNoteId, performRename, root]);
 
   const handleEditKeyDown = useCallback((event: React.KeyboardEvent) => {
     if (event.key === 'Enter') {
@@ -442,17 +399,6 @@ export function NotesPanel({
               Notes
             </div>
             <div className="flex items-center gap-1">
-              <button
-                type="button"
-                className="rounded border border-border p-1 hover:bg-muted disabled:opacity-60"
-                onClick={createVaultFolder}
-                disabled={!root}
-                title="New folder"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-              </button>
               <button
                 type="button"
                 className="rounded border border-border p-1 hover:bg-muted disabled:opacity-60"
@@ -499,7 +445,7 @@ export function NotesPanel({
                 onEditBlur={handleEditBlur}
                 onEditKeyDown={handleEditKeyDown}
               />
-              {searchIds && visibleNotes.length === 0 ? (
+              {searchQuery.trim() && visibleNotes.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-black/15 bg-white/70 p-4 text-sm text-muted-foreground">
                   No notes match this search.
                 </div>
@@ -584,9 +530,9 @@ export function NotesPanel({
           )}
         </div>
       </section>
-      {status ? (
+      {(status||parentStatus) ? (
         <div className="border-t border-black/10 bg-amber-50 px-6 py-3 text-sm text-amber-900">
-          {status}
+          {status || parentStatus}
         </div>
       ) : noteBuffer.conflict ? (
         <div className="border-t border-black/10 bg-amber-50 px-6 py-3 text-sm text-amber-900">

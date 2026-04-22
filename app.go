@@ -132,8 +132,9 @@ func (a *App) EncryptNote(root string, relPath string, contents string) (backend
 	if a.secure == nil {
 		a.secure = backend.NewSecureVaultManager()
 	}
+	target := backend.SecureNoteTargetPath(relPath)
 	if a.watcher != nil {
-		a.watcher.TagSelf(relPath, secureNoteTargetPath(relPath))
+		a.watcher.TagSelf(relPath, target)
 	}
 	if err := a.secure.EncryptNote(root, relPath, contents); err != nil {
 		return backend.ScannedNote{}, err
@@ -142,7 +143,6 @@ func (a *App) EncryptNote(root string, relPath string, contents string) (backend
 	if err != nil {
 		return backend.ScannedNote{}, err
 	}
-	target := secureNoteTargetPath(relPath)
 	for _, note := range notes {
 		if note.ID == target {
 			return note, nil
@@ -163,19 +163,6 @@ func (a *App) ChangeSecurePassword(root string, oldPassword string, newPassword 
 		a.secure = backend.NewSecureVaultManager()
 	}
 	return a.secure.ChangeSecurePassword(root, oldPassword, newPassword)
-}
-
-func secureNoteTargetPath(relPath string) string {
-	switch {
-	case len(relPath) >= len(".md.sec") && relPath[len(relPath)-len(".md.sec"):] == ".md.sec":
-		return relPath
-	case len(relPath) >= len(".md") && relPath[len(relPath)-len(".md"):] == ".md":
-		return relPath + ".sec"
-	case len(relPath) >= len(".txt") && relPath[len(relPath)-len(".txt"):] == ".txt":
-		return relPath + ".sec"
-	default:
-		return relPath + ".sec"
-	}
 }
 
 func (a *App) ProviderApiKeyLoad(providerId string) (*string, error) {

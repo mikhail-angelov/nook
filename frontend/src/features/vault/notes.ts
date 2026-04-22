@@ -53,21 +53,26 @@ export function noteToScanned(note: Note, body: string): ScannedNote {
 export async function loadNote(
   id: string,
   vaultRoot: string,
+  seed?: {
+    mtime?: number;
+    createdAt?: number;
+    created_at?: number;
+  },
 ): Promise<Note | null> {
   const secure = isSecurePath(id);
   const raw = secure
     ? await vaultDecryptNote(vaultRoot, id)
     : await vaultReadFile(vaultRoot, id);
   const parsed = parseNote(raw, id);
-  const now = Math.floor(Date.now() / 1000);
   return {
     id,
     path: id,
     title: parsed.title,
     body: raw,
     isSecure: secure,
-    mtime: now,
-    createdAt: now,
+    mtime: seed?.mtime ?? Math.floor(Date.now() / 1000),
+    createdAt:
+      seed?.createdAt ?? seed?.created_at ?? Math.floor(Date.now() / 1000),
   };
 }
 

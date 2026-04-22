@@ -5,6 +5,7 @@ import {
   makeNoteSecure,
   saveNote,
 } from "./notes";
+import type { ScannedNote } from "./types";
 
 const vaultReadFile = vi.fn();
 const vaultWriteFile = vi.fn();
@@ -77,5 +78,28 @@ describe("vault notes secure flows", () => {
       "Plain body\n",
     );
     expect(note.id).toBe("notes/plain.md.sec");
+  });
+
+  it("preserves scanned timestamps when loading a plaintext note", async () => {
+    vaultReadFile.mockResolvedValueOnce("Alpha body\n");
+    const scanned: ScannedNote = {
+      id: "notes/a.md",
+      path: "notes/a.md",
+      title: "Alpha",
+      body: "Alpha body\n",
+      is_secure: false,
+      mtime: 123,
+      created_at: 45,
+      tags: [],
+      wikilinks: [],
+    };
+
+    const note = await loadNote("notes/a.md", "/vault", scanned);
+
+    expect(note).toMatchObject({
+      id: "notes/a.md",
+      mtime: 123,
+      createdAt: 45,
+    });
   });
 });

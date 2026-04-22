@@ -72,6 +72,7 @@ export function Header({ root, openVault, loadingVault, setMode, mode }: HeaderP
         <div className="relative" ref={menuRef}>
           <button
             type="button"
+            aria-label="Open vault menu"
             className="rounded-md border border-black/10 bg-white p-2 text-gray-700 hover:bg-gray-100"
             onClick={() => setMenuOpen(!menuOpen)}
           >

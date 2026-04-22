@@ -35,6 +35,7 @@ export default function App() {
   const [status, setStatus] = useState<string | null>(null);
   const [mode, setMode] = useState<MODE>(MODE.NOTES);
   const [loadingVault, setLoadingVault] = useState(false);
+  const [vaultEvent, setVaultEvent] = useState<VaultEvent | null>(null);
   const providerStore = useMemo(() => createWailsProviderApiKeyStore(), []);
 
   const resolveProvider = useCallback(
@@ -62,13 +63,10 @@ export default function App() {
     async (folder: string) => {
       const scanned = await vaultScan(folder);
       await restoreSearchIndex(folder, scanned);
+      await vaultStopWatching();
+      await vaultStartWatching(folder);
       setRoot(folder);
-      // setSecureUnlocked(false);
       ingestScan(scanned);
-      // setSelectedId(scanned[0]?.id ?? null);
-      // setActiveNote(null);
-      //setSearchQuery("");
-      // setSearchIds(null);
     },
     [ingestScan, setRoot],
   );
@@ -113,27 +111,12 @@ export default function App() {
   }, [hydrateVault]);
 
   useEffect(() => {
-    if (!root) {
-      // setSelectedId(null);
-      // setActiveNote(null);
-      // setSecureUnlocked(false);
-      return;
-    }
-    let cancelled = false;
-    void vaultStartWatching(root);
-    return () => {
-      cancelled = true;
-      void vaultStopWatching();
-      if (cancelled) return;
-    };
-  }, [root]);
-
-  useEffect(() => {
     let active = true;
     let unlisten: (() => void) | undefined;
     void (async () => {
       unlisten = await onVaultEvent((event: VaultEvent) => {
         if (active) {
+          setVaultEvent(event);
           applyEvent(event);
         }
       });
@@ -144,6 +127,7 @@ export default function App() {
     return () => {
       active = false;
       unlisten?.();
+      void vaultStopWatching();
     };
   }, [applyEvent]);
 
@@ -160,6 +144,7 @@ export default function App() {
             upsertNote={upsertNote}
             removeNote={removeNote}
             openVault={openVault}
+            vaultEvent={vaultEvent}
           />
         ) : (
           <ChatPanel

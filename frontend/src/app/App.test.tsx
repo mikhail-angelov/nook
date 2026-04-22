@@ -26,6 +26,8 @@ const restoreSearchIndex = vi.fn();
 const searchNotes = vi.fn();
 const upsertSearchNote = vi.fn();
 const removeSearchNote = vi.fn();
+const getSettings = vi.fn();
+const updateSettings = vi.fn();
 const vaultEventHandlers: Array<(event: VaultEvent) => void> = [];
 
 vi.mock("@/features/vault/api", () => ({
@@ -67,6 +69,11 @@ vi.mock("@/features/search/search", () => ({
   searchNotes: (...args: unknown[]) => searchNotes(...args),
   upsertSearchNote: (...args: unknown[]) => upsertSearchNote(...args),
   removeSearchNote: (...args: unknown[]) => removeSearchNote(...args),
+}));
+
+vi.mock("@/features/settings/api", () => ({
+  getSettings: (...args: unknown[]) => getSettings(...args),
+  updateSettings: (...args: unknown[]) => updateSettings(...args),
 }));
 
 vi.mock("@/features/editor/Editor", () => ({
@@ -120,6 +127,21 @@ import App from "./App";
 
 const promptMock = vi.fn();
 const confirmMock = vi.fn();
+
+async function openVaultFromUi(): Promise<void> {
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Open vault menu" }));
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Open vault" }));
+  });
+}
+
+async function expandNotesFolder(): Promise<void> {
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Expand folder" }));
+  });
+}
 
 function makeScannedNote(
   id: string,
@@ -218,6 +240,8 @@ describe("App vault shell", () => {
     searchNotes.mockReset().mockResolvedValue([]);
     upsertSearchNote.mockReset();
     removeSearchNote.mockReset();
+    getSettings.mockReset().mockResolvedValue({ vaultFolder: "" });
+    updateSettings.mockReset().mockResolvedValue(undefined);
     vaultReadFile.mockReset().mockResolvedValue("Alpha from disk\n");
     vaultDecryptNote.mockReset().mockResolvedValue("Secret body\n");
     vaultEncryptNote.mockReset().mockImplementation(async (_root: string, relPath: string, body: string) =>
@@ -241,7 +265,7 @@ describe("App vault shell", () => {
   it("opens a vault, loads notes, selects the first note, and starts watching", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open vault" }));
+    await openVaultFromUi();
 
     await waitFor(() => {
       expect(vaultPickFolder).toHaveBeenCalledTimes(1);
@@ -253,8 +277,10 @@ describe("App vault shell", () => {
       expect(vaultStartWatching).toHaveBeenCalledWith("/vault");
     });
 
-    expect(screen.getByRole("button", { name: "Alpha" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Beta" })).toBeInTheDocument();
+    await expandNotesFolder();
+
+    expect(screen.getByRole("button", { name: "a.md" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "b.md" })).toBeInTheDocument();
     expect(screen.getByTestId("editor-note")).toHaveTextContent("notes/a.md");
     expect(screen.getByTestId("editor-value")).toHaveTextContent("Alpha body");
   });
@@ -262,19 +288,29 @@ describe("App vault shell", () => {
   it("loads a clicked note into the editor", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open vault" }));
+    await openVaultFromUi();
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Beta" })).toBeInTheDocument();
+      expect(screen.getByTestId("editor-note")).toHaveTextContent("notes/a.md");
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Beta" }));
+    await expandNotesFolder();
+    fireEvent.click(screen.getByRole("button", { name: "b.md" }));
 
     await waitFor(() => {
-      expect(loadNote).toHaveBeenCalledWith("notes/b.md", "/vault");
+      expect(loadNote).toHaveBeenCalledWith(
+        "notes/b.md",
+        "/vault",
+        expect.objectContaining({
+          mtime: 100,
+          createdAt: 100,
+        }),
+      );
     });
-    expect(screen.getByTestId("editor-note")).toHaveTextContent("notes/b.md");
-    expect(screen.getByTestId("editor-value")).toHaveTextContent("Beta body");
+    await waitFor(() => {
+      expect(screen.getByTestId("editor-note")).toHaveTextContent("notes/b.md");
+      expect(screen.getByTestId("editor-value")).toHaveTextContent("Beta body");
+    });
   });
 
   it("flushes autosave on blur and updates the sidebar title from the saved note", async () => {
@@ -287,10 +323,10 @@ describe("App vault shell", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open vault" }));
+    await openVaultFromUi();
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Alpha" })).toBeInTheDocument();
+      expect(screen.getByTestId("editor-note")).toHaveTextContent("notes/a.md");
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Edit body" }));
@@ -304,7 +340,7 @@ describe("App vault shell", () => {
       );
     });
     expect(screen.getByTestId("editor-value")).toHaveTextContent("edited body");
-    expect(screen.getByRole("button", { name: /Alpha saved/ })).toBeInTheDocument();
+    expect(screen.getByText("Alpha saved")).toBeInTheDocument();
   });
 
   it("creates a new note through the prompt and bridge", async () => {
@@ -312,10 +348,10 @@ describe("App vault shell", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open vault" }));
+    await openVaultFromUi();
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Alpha" })).toBeInTheDocument();
+      expect(screen.getByTestId("editor-note")).toHaveTextContent("notes/a.md");
     });
 
     fireEvent.click(screen.getByRole("button", { name: "New note" }));
@@ -324,7 +360,7 @@ describe("App vault shell", () => {
       expect(createNote).toHaveBeenCalledWith("/vault", "notes/gamma.md", "");
     });
     expect(screen.getByTestId("editor-note")).toHaveTextContent("notes/gamma.md");
-    expect(screen.getByRole("button", { name: /Gamma/ })).toBeInTheDocument();
+    expect(screen.getByText("Gamma")).toBeInTheDocument();
   });
 
   it("renames the selected note through the prompt and bridge", async () => {
@@ -332,7 +368,7 @@ describe("App vault shell", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open vault" }));
+    await openVaultFromUi();
 
     await waitFor(() => {
       expect(screen.getByTestId("editor-note")).toHaveTextContent("notes/a.md");
@@ -350,7 +386,7 @@ describe("App vault shell", () => {
     expect(screen.getByTestId("editor-note")).toHaveTextContent(
       "notes/alpha-renamed.md",
     );
-    expect(screen.getByRole("button", { name: /Alpha renamed/ })).toBeInTheDocument();
+    expect(screen.getByText("Alpha renamed")).toBeInTheDocument();
   });
 
   it("deletes the selected note and selects the next note", async () => {
@@ -358,7 +394,7 @@ describe("App vault shell", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open vault" }));
+    await openVaultFromUi();
 
     await waitFor(() => {
       expect(screen.getByTestId("editor-note")).toHaveTextContent("notes/a.md");
@@ -390,21 +426,19 @@ describe("App vault shell", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open vault" }));
+    await openVaultFromUi();
 
     await waitFor(() => {
       expect(restoreSearchIndex).toHaveBeenCalledWith("/vault", expect.any(Array));
     });
 
-    fireEvent.change(screen.getByPlaceholderText("Search notes"), {
+    fireEvent.change(screen.getByPlaceholderText(/Search notes/), {
       target: { value: "beta" },
     });
 
-    await waitFor(() => {
-      expect(searchNotes).toHaveBeenCalledWith("beta", 50);
-    });
-    expect(screen.getByRole("button", { name: "Beta" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Alpha" })).not.toBeInTheDocument();
+    await expandNotesFolder();
+    expect(screen.getByRole("button", { name: "b.md" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "a.md" })).not.toBeInTheDocument();
   });
 
   it("reloads clean external changes and marks dirty changes as conflicts", async () => {
@@ -426,7 +460,7 @@ describe("App vault shell", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open vault" }));
+    await openVaultFromUi();
 
     await waitFor(() => {
       expect(screen.getByTestId("editor-note")).toHaveTextContent("notes/a.md");
@@ -476,7 +510,13 @@ describe("App vault shell", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open vault" }));
+    await openVaultFromUi();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("editor-note")).toHaveTextContent("notes/plain.md");
+    });
+    await expandNotesFolder();
+    fireEvent.click(screen.getByRole("button", { name: "secret.md.sec" }));
 
     await waitFor(() => {
       expect(vaultUnlockSecure).toHaveBeenCalledWith("/vault", "vault-password");
@@ -484,8 +524,10 @@ describe("App vault shell", () => {
     expect(promptMock).toHaveBeenCalledWith("Vault password", {
       defaultValue: "",
     });
-    expect(screen.getByTestId("editor-note")).toHaveTextContent("notes/secret.md.sec");
-    expect(screen.getByTestId("editor-value")).toHaveTextContent("Secret body");
+    await waitFor(() => {
+      expect(screen.getByTestId("editor-note")).toHaveTextContent("notes/secret.md.sec");
+      expect(screen.getByTestId("editor-value")).toHaveTextContent("Secret body");
+    });
     expect(screen.getByRole("button", { name: "Make secure" })).toBeDisabled();
   });
 
@@ -494,7 +536,7 @@ describe("App vault shell", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open vault" }));
+    await openVaultFromUi();
 
     await waitFor(() => {
       expect(screen.getByTestId("editor-note")).toHaveTextContent("notes/a.md");
@@ -511,19 +553,19 @@ describe("App vault shell", () => {
       );
     });
     expect(screen.getByTestId("editor-note")).toHaveTextContent("notes/a.md.sec");
-    expect(screen.getByRole("button", { name: /Alpha secured/ })).toBeInTheDocument();
+    expect(screen.getByText("Alpha secured")).toBeInTheDocument();
   });
 
   it("subscribes to watcher events and cleans up on unmount", async () => {
     const { unmount } = render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open vault" }));
+    await openVaultFromUi();
 
     await waitFor(() => {
       expect(vaultStartWatching).toHaveBeenCalledWith("/vault");
     });
     await waitFor(() => {
-      expect(vaultEventHandlers.length).toBeGreaterThanOrEqual(2);
+      expect(vaultEventHandlers).toHaveLength(1);
     });
 
     unmount();

@@ -110,10 +110,30 @@ export async function appendChatSessionMessage(
 ): Promise<void> {
   const line = JSON.stringify(args.message);
   await chatAppendSessionLine(args.vaultRoot, args.sessionId, line);
-  await rebuildChatSessionMeta({
-    vaultRoot: args.vaultRoot,
-    sessionId: args.sessionId,
-  });
+
+  const raw = await chatReadSessionMeta(args.vaultRoot, args.sessionId);
+  const existing = raw ? parseChatSessionMetadata(raw) : null;
+  if (!existing) {
+    await rebuildChatSessionMeta({
+      vaultRoot: args.vaultRoot,
+      sessionId: args.sessionId,
+    });
+    return;
+  }
+
+  const next: ChatSessionMetadata = {
+    ...existing,
+    messageCount: existing.messageCount + 1,
+    updatedAt: args.message.ts || existing.updatedAt,
+  };
+  const trimmedTitle = existing.title.trim();
+  if (!trimmedTitle || trimmedTitle === "Untitled chat") {
+    if (args.message.role === "user") {
+      const content = args.message.content.trim();
+      if (content) next.title = content;
+    }
+  }
+  await writeChatSessionMeta(args.vaultRoot, args.sessionId, next);
 }
 
 export async function loadChatSession(
@@ -135,14 +155,8 @@ export async function loadChatSession(
 }
 
 export async function listChatSessions(
-  argsOrVaultRoot: ListChatSessionsArgs | string,
-  maybeLimit = 50,
+  args: ListChatSessionsArgs,
 ): Promise<ChatSessionMetadata[]> {
-  const args =
-    typeof argsOrVaultRoot === "string"
-      ? { vaultRoot: argsOrVaultRoot, limit: maybeLimit }
-      : argsOrVaultRoot;
-
   const sessionIds = await chatListSessionIds(args.vaultRoot);
   const sessions = await Promise.all(
     sessionIds.map(async (sessionId) => {
@@ -197,41 +211,22 @@ export async function updateChatSessionMetadata(
 }
 
 export async function renameChatSession(
-  argsOrVaultRoot: RenameChatSessionArgs | string,
-  maybeOldSessionId?: string,
-  maybeNewSessionId?: string,
+  args: RenameChatSessionArgs,
 ): Promise<ChatSessionMetadata> {
-  const args =
-    typeof argsOrVaultRoot === "string"
-      ? {
-          vaultRoot: argsOrVaultRoot,
-          oldSessionId: maybeOldSessionId ?? "",
-          newSessionId: maybeNewSessionId ?? "",
-        }
-      : argsOrVaultRoot;
-
   await chatRenameSession(args.vaultRoot, args.oldSessionId, args.newSessionId);
-  const metadata = await loadChatSession({
+  const session = await loadChatSession({
     vaultRoot: args.vaultRoot,
     sessionId: args.newSessionId,
-  }).then((session) => session.metadata);
+  });
   return {
-    ...metadata,
+    ...session.metadata,
     id: args.newSessionId,
   };
 }
 
 export async function deleteChatSession(
-  argsOrVaultRoot: DeleteChatSessionArgs | string,
-  maybeSessionId?: string,
+  args: DeleteChatSessionArgs,
 ): Promise<void> {
-  const args =
-    typeof argsOrVaultRoot === "string"
-      ? {
-          vaultRoot: argsOrVaultRoot,
-          sessionId: maybeSessionId ?? "",
-        }
-      : argsOrVaultRoot;
   await chatDeleteSession(args.vaultRoot, args.sessionId);
 }
 

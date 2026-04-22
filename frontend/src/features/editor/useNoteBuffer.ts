@@ -5,8 +5,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { onVaultEvent, vaultReadFile } from "@/features/vault/api";
 import { loadNote, type Note } from "@/features/vault/notes";
+import type { VaultEvent } from "@/features/vault/types";
 
 export type NoteBuffer = {
   /** Editor draft. `null` while no note is selected. */
@@ -26,6 +26,7 @@ export type NoteBuffer = {
 export function useNoteBuffer(
   note: Note | null,
   vaultRoot: string | null,
+  vaultEvent: VaultEvent | null,
 ): NoteBuffer {
   const [draft, setDraft] = useState<string>(note?.body ?? "");
   const [lastSavedBody, setLastSavedBody] = useState<string>(note?.body ?? "");
@@ -53,12 +54,7 @@ export function useNoteBuffer(
   const reloadFromDisk = useCallback(async (): Promise<void> => {
     if (!note || !vaultRoot) return;
     try {
-      if (!note.isSecure) {
-        const body = await vaultReadFile(vaultRoot, note.path);
-        setDraft(body);
-        setLastSavedBody(body);
-      }
-      const fresh = await loadNote(note.path, vaultRoot);
+      const fresh = await loadNote(note.path, vaultRoot, note);
       if (fresh && fresh.body !== null) {
         setDraft(fresh.body);
         setLastSavedBody(fresh.body);
@@ -70,39 +66,16 @@ export function useNoteBuffer(
   }, [note, vaultRoot]);
 
   useEffect(() => {
-    if (!note || !vaultRoot) return;
-    let active = true;
-    let unlisten: (() => void) | null = null;
-
-    (async () => {
-      try {
-        unlisten = await onVaultEvent((e) => {
-          if (!active) return;
-          const id = noteIdRef.current;
-          if (!id) return;
-          if (e.kind === "Modified" && e.data === id) {
-            const dirty = draftRef.current !== lastSavedRef.current;
-            if (dirty) {
-              setConflict(true);
-            } else {
-              void reloadFromDisk();
-            }
-          }
-        });
-        if (!active) {
-          unlisten();
-          unlisten = null;
-        }
-      } catch {
-        // onVaultEvent is unavailable 
-      }
-    })();
-
-    return () => {
-      active = false;
-      if (unlisten) unlisten();
-    };
-  }, [note, vaultRoot, reloadFromDisk]);
+    const id = noteIdRef.current;
+    if (!id || !vaultRoot || !vaultEvent) return;
+    if (vaultEvent.kind !== "Modified" || vaultEvent.data !== id) return;
+    const dirty = draftRef.current !== lastSavedRef.current;
+    if (dirty) {
+      setConflict(true);
+      return;
+    }
+    void reloadFromDisk();
+  }, [reloadFromDisk, vaultEvent, vaultRoot]);
 
   return {
     draft,

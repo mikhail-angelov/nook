@@ -52,7 +52,7 @@ func (m *SecureVaultManager) EncryptNote(root string, relPath string, plaintext 
 	if err != nil {
 		return err
 	}
-	targetRelPath := secureNoteTargetPath(relPath)
+	targetRelPath := SecureNoteTargetPath(relPath)
 	targetPath, err := SafeVaultPath(root, targetRelPath)
 	if err != nil {
 		return err
@@ -222,7 +222,7 @@ func decryptSecurePayload(key []byte, payload []byte) ([]byte, error) {
 	return gcm.Open(nil, nonce, ciphertext, nil)
 }
 
-func secureNoteTargetPath(relPath string) string {
+func SecureNoteTargetPath(relPath string) string {
 	switch {
 	case strings.HasSuffix(relPath, ".md.sec"):
 		return relPath
