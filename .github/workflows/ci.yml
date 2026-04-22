@@ -30,16 +30,16 @@ jobs:
       working-directory: ./frontend
       run: npm ci
     
+    - name: Build frontend
+      working-directory: ./frontend
+      run: npm run build
+    
     - name: Run frontend tests
       working-directory: ./frontend
       run: npm test
     
     - name: Run Go tests
-      run: go test ./...
-    
-    - name: Build frontend
-      working-directory: ./frontend
-      run: npm run build
+      run: go test ./backend/...
     
     - name: Check TypeScript compilation
       working-directory: ./frontend
