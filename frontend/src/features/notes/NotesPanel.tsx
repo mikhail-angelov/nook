@@ -21,6 +21,7 @@ import { useNoteBuffer } from "@/features/editor/useNoteBuffer";
 import { Editor } from "@/features/editor/Editor";
 import { PromptApi } from "@/components/PromptDialog";
 import { ScannedNote } from "../vault/types";
+import { TreeView, type TreeNode } from "./TreeView";
 
 type NotesPanelProps = {
   root: string | null;
@@ -41,6 +42,48 @@ function sortNotes(a: ScannedNote, b: ScannedNote): number {
     sensitivity: "base",
   });
   return title !== 0 ? title : a.path.localeCompare(b.path);
+}
+
+function buildTreeFromNotes(notes: ScannedNote[]): TreeNode[] {
+  const root: TreeNode = { id: '', name: '', type: 'folder', children: [] };
+  
+  for (const note of notes) {
+    const parts = note.id.split('/');
+    let current = root;
+    
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const isFile = i === parts.length - 1;
+      const nodeId = parts.slice(0, i + 1).join('/');
+      
+      let child = current.children.find(c => c.name === part);
+      if (!child) {
+        child = {
+          id: nodeId,
+          name: part,
+          type: isFile ? 'file' : 'folder',
+          children: [],
+          note: isFile ? note : undefined
+        };
+        current.children.push(child);
+      }
+      current = child;
+    }
+  }
+  
+  // Sort folders first, then files, alphabetically
+  const sortNodes = (nodes: TreeNode[]): TreeNode[] => {
+    return nodes.sort((a, b) => {
+      if (a.type === 'folder' && b.type === 'file') return -1;
+      if (a.type === 'file' && b.type === 'folder') return 1;
+      return a.name.localeCompare(b.name);
+    }).map(node => ({
+      ...node,
+      children: sortNodes(node.children)
+    }));
+  };
+  
+  return sortNodes(root.children);
 }
 
 export function NotesPanel({
@@ -239,6 +282,26 @@ export function NotesPanel({
     setActiveNote(note);
   }, [autosave, promptApi, root, upsertNote]);
 
+  const createVaultFolder = useCallback(async () => {
+    if (!root) return;
+    const folderPath = await promptApi.prompt("Create folder", {
+      defaultValue: "notes/new-folder",
+    });
+    if (!folderPath) return;
+    
+    // Ensure the folder path ends with a slash for consistency
+    const normalizedPath = folderPath.endsWith('/') ? folderPath : folderPath + '/';
+    
+    // Create an empty note with .md extension to represent the folder
+    // In a real implementation, we would create an actual directory
+    const note = await createNote(root, normalizedPath + ".folder.md", "# Folder\n\nThis is a folder placeholder.");
+    const stored = toScannedNote(note);
+    upsertSearchNote(stored);
+    upsertNote(stored);
+    setSelectedId(note.id);
+    setActiveNote(note);
+  }, [autosave, promptApi, root, upsertNote]);
+
   const renameSelectedNote = useCallback(async () => {
     if (!root || !activeNote) return;
     const nextPath = await promptApi.prompt("Rename note", {
@@ -306,6 +369,68 @@ export function NotesPanel({
   }, [activeNote, noteBuffer, refreshActiveNote, root]);
 
   const hasNotes = notes.length > 0;
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+
+  const treeData = useMemo(() => buildTreeFromNotes(visibleNotes), [visibleNotes]);
+
+  const toggleFolder = useCallback((folderId: string) => {
+    setExpandedFolders(prev => {
+      const next = new Set(prev);
+      if (next.has(folderId)) {
+        next.delete(folderId);
+      } else {
+        next.add(folderId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleNoteClick = useCallback((noteId: string) => {
+    void selectNote(noteId);
+  }, [selectNote]);
+
+
+  const handleEditBlur = useCallback(async () => {
+    if (!editingNoteId || !root || editingName === editingNoteId) {
+      setEditingNoteId(null);
+      return;
+    }
+
+    try {
+      await autosave.flush();
+      const renamed = await renameNote(editingNoteId, editingName, root);
+      removeNote(editingNoteId);
+      removeSearchNote(editingNoteId);
+      const stored = toScannedNote(renamed);
+      upsertSearchNote(stored);
+      upsertNote(stored);
+      setSelectedId(renamed.id);
+      setActiveNote(renamed);
+    } catch (error) {
+      setStatus(
+        error instanceof Error ? error.message : "Failed to rename note"
+      );
+    } finally {
+      setEditingNoteId(null);
+    }
+  }, [editingNoteId, editingName, root, autosave, removeNote, removeSearchNote, upsertSearchNote, upsertNote]);
+
+  const handleEditKeyDown = useCallback((event: React.KeyboardEvent) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      void handleEditBlur();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      setEditingNoteId(null);
+    }
+  }, [handleEditBlur]);
+
+  const handleStartEdit = useCallback((nodeId: string, currentPath: string) => {
+    setEditingNoteId(nodeId);
+    setEditingName(currentPath);
+  }, []);
 
   return (
     <main className="grid min-h-0 flex-1 grid-cols-[19rem_minmax(0,1fr)] gap-0">
@@ -316,14 +441,30 @@ export function NotesPanel({
             <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
               Notes
             </div>
-            <button
-              type="button"
-              className="rounded border border-border px-2 py-1 text-[11px] hover:bg-muted"
-              onClick={createVaultNote}
-              disabled={!root}
-            >
-              New note
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                className="rounded border border-border p-1 hover:bg-muted disabled:opacity-60"
+                onClick={createVaultFolder}
+                disabled={!root}
+                title="New folder"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="rounded border border-border p-1 hover:bg-muted disabled:opacity-60"
+                onClick={createVaultNote}
+                disabled={!root}
+                title="New note"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </button>
+            </div>
           </div>
           <input
             ref={searchInputRef}
@@ -344,35 +485,26 @@ export function NotesPanel({
                 : "Open a vault to see your notes."}
             </div>
           ) : (
-            <div className="space-y-1">
-              {visibleNotes.map((note) => (
-                <button
-                  key={note.id}
-                  type="button"
-                  aria-label={note.title}
-                  onClick={() => {
-                    void selectNote(note.id);
-                  }}
-                  className={`flex w-full flex-col items-start rounded-lg border px-3 py-2 text-left text-sm transition ${
-                    note.id === selectedId
-                      ? "border-black/20 bg-black text-white shadow-sm"
-                      : "border-transparent bg-white/80 hover:border-black/10 hover:bg-white"
-                  }`}
-                >
-                  <span className="font-medium">{note.title}</span>
-                  <span
-                    className={`text-xs ${note.id === selectedId ? "text-white/70" : "text-muted-foreground"}`}
-                  >
-                    {note.path}
-                  </span>
-                </button>
-              ))}
+            <>
+              <TreeView 
+                nodes={treeData}
+                selectedId={selectedId}
+                expandedFolders={expandedFolders}
+                onToggleFolder={toggleFolder}
+                onSelectNote={handleNoteClick}
+                onStartEdit={handleStartEdit}
+                editingNoteId={editingNoteId}
+                editingName={editingName}
+                onEditChange={setEditingName}
+                onEditBlur={handleEditBlur}
+                onEditKeyDown={handleEditKeyDown}
+              />
               {searchIds && visibleNotes.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-black/15 bg-white/70 p-4 text-sm text-muted-foreground">
                   No notes match this search.
                 </div>
               ) : null}
-            </div>
+            </>
           )}
         </div>
       </aside>
