@@ -133,6 +133,51 @@ export default function App() {
     };
   }, [applyEvent]);
 
+  // Listen for system tray events
+  useEffect(() => {
+    let unlistenShow: (() => void) | undefined;
+    let unlistenQuit: (() => void) | undefined;
+
+    // Access Wails runtime directly without importing from wailsjs
+    // (avoids module resolution failures in test environment)
+    const rt =
+      typeof window !== "undefined" &&
+      (window as unknown as { runtime?: { EventsOn?: unknown } }).runtime;
+    const wailsEventsOn = rt?.EventsOn as
+      | ((event: string, cb: () => void) => Promise<() => void>)
+      | undefined;
+
+    if (wailsEventsOn) {
+      void (async () => {
+        try {
+          unlistenShow = await wailsEventsOn("tray://show-window", () => {
+            try {
+              // @ts-expect-error - Wails runtime injected at build time
+              window.runtime.WindowShow();
+            } catch {
+              // runtime not available
+            }
+          });
+          unlistenQuit = await wailsEventsOn("tray://quit", () => {
+            try {
+              // @ts-expect-error - Wails runtime injected at build time
+              window.runtime.Quit();
+            } catch {
+              // runtime not available
+            }
+          });
+        } catch {
+          // Failed to register event listeners
+        }
+      })();
+    }
+
+    return () => {
+      unlistenShow?.();
+      unlistenQuit?.();
+    };
+  }, []);
+
   return (
     <div className="flex h-screen w-screen flex-col bg-[radial-gradient(circle_at_top,_rgba(37,99,235,0.16),_transparent_45%),linear-gradient(180deg,#fbfbf8_0%,#f2efe7_100%)] text-foreground">
       <Header root={root} loadingVault={loadingVault} openVault={openVault} setMode={setMode} mode={mode}/>

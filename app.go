@@ -16,12 +16,14 @@ type App struct {
 	watcher *backend.WatcherManager
 	secure  *backend.SecureVaultManager
 	hotkey  *backend.HotkeyManager
+	tray    *backend.SystrayManager
 }
 
 // NewApp creates a new App application struct
-func NewApp() *App {
+func NewApp(trayIcon []byte) *App {
 	app := &App{secure: backend.NewSecureVaultManager()}
 	app.hotkey = backend.NewHotkeyManager()
+	app.tray = backend.NewSystrayManager(trayIcon)
 	app.watcher = backend.NewWatcherManager(func(event backend.VaultEvent) {
 		if app.ctx != nil {
 			runtime.EventsEmit(app.ctx, "vault://event", event)
@@ -37,11 +39,17 @@ func (a *App) startup(ctx context.Context) {
 	if err := a.hotkey.Start(ctx); err != nil {
 		runtime.LogWarning(ctx, fmt.Sprintf("hotkey: %v", err))
 	}
+	if err := a.tray.Start(ctx); err != nil {
+		runtime.LogWarning(ctx, fmt.Sprintf("tray: %v", err))
+	}
 }
 
 func (a *App) shutdown(_ context.Context) {
 	if a.hotkey != nil {
 		_ = a.hotkey.Stop()
+	}
+	if a.tray != nil {
+		a.tray.Stop()
 	}
 	if a.watcher != nil {
 		_ = a.watcher.Stop()
