@@ -23,7 +23,7 @@ jobs:
         go-version: '1.23'
     
     - name: Install system dependencies
-      run: sudo apt-get update && sudo apt-get install -y libx11-dev
+      run: sudo apt-get update && sudo apt-get install -y libx11-dev xvfb
     
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -45,7 +45,7 @@ jobs:
       run: npm test
     
     - name: Run Go tests
-      run: go test ./backend/...
+      run: xvfb-run go test ./backend/... -v
     
     - name: Check TypeScript compilation
       working-directory: ./frontend
