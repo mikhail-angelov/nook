@@ -6,6 +6,7 @@ import {
   VaultPickFolder,
   VaultReadFile,
   VaultRenameFile,
+  VaultSaveImage,
   VaultScan,
   UnlockSecure,
   VaultStartWatching,
@@ -94,6 +95,14 @@ export async function vaultStartWatching(root: string): Promise<void> {
 
 export async function vaultStopWatching(): Promise<void> {
   await VaultStopWatching();
+}
+
+export async function vaultSaveImage(
+  root: string,
+  filename: string,
+  base64Data: string,
+): Promise<string> {
+  return VaultSaveImage(root, filename, base64Data);
 }
 
 export async function onVaultEvent(

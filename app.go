@@ -204,3 +204,9 @@ func (a *App) GetSettings() (backend.Settings, error) {
 func (a *App) UpdateSettings(settings backend.Settings) error {
 	return backend.SaveSettings(settings)
 }
+
+// VaultSaveImage stores an image file into <root>/assets/ and returns the relative path.
+// Supported formats: png, jpg, jpeg, gif, webp, svg
+func (a *App) VaultSaveImage(root string, filename string, base64Data string) (string, error) {
+	return backend.SaveImageFile(root, filename, base64Data)
+}

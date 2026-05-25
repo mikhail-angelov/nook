@@ -51,3 +51,5 @@ export function VaultStartWatching(arg1:string):Promise<void>;
 export function VaultStopWatching():Promise<void>;
 
 export function VaultWriteFile(arg1:string,arg2:string,arg3:string):Promise<number>;
+
+export function VaultSaveImage(arg1:string,arg2:string,arg3:string):Promise<string>;

@@ -14,8 +14,10 @@ import { search, searchKeymap } from "@codemirror/search";
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
+import { GFM } from "@lezer/markdown";
 
 import { wikilinkDecorationPlugin } from "./wikilinks";
+import { vaultSaveImage } from "@/features/vault/api";
 import type { Note } from "@/features/vault/notes";
 
 export type EditorProps = {
@@ -30,6 +32,8 @@ export type EditorProps = {
   onReload?: () => void;
   /** Fired on Cmd/Ctrl+Shift+F with any currently selected text. */
   onGlobalSearch?: (selection: string) => void;
+  /** Vault root path (required for image drag-and-drop / paste). */
+  vaultRoot?: string | null;
 };
 
 export function shouldSyncEditorDocument(opts: {
@@ -93,11 +97,146 @@ const editorTheme = EditorView.theme({
   },
 });
 
+// ── Image handling helpers ──────────────────────────────────────────────────
+
+async function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function insertImageAtCursor(
+  view: EditorView,
+  relPath: string,
+  filename: string,
+) {
+  const alt = filename.replace(/\.[^.]+$/, "");
+  const imageMd = `![${alt}](${relPath})`;
+  view.dispatch({
+    changes: { from: view.state.selection.main.head, insert: imageMd },
+  });
+}
+
+async function handleImagePaste(
+  event: ClipboardEvent,
+  view: EditorView,
+  vaultRoot: string,
+): Promise<boolean> {
+  const items = event.clipboardData?.items;
+  if (!items) return false;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
+    event.preventDefault();
+    const file = item.getAsFile();
+    if (!file) continue;
+    try {
+      const base64 = await readFileAsBase64(file);
+      const relPath = await vaultSaveImage(vaultRoot, file.name, base64);
+      insertImageAtCursor(view, relPath, file.name);
+    } catch (err) {
+      console.error("Failed to paste image:", err);
+    }
+    return true;
+  }
+  return false;
+}
+
+async function handleImageDrop(
+  event: DragEvent,
+  view: EditorView,
+  vaultRoot: string,
+): Promise<boolean> {
+  const files = event.dataTransfer?.files;
+  if (!files || files.length === 0) return false;
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    if (!file.type.startsWith("image/")) continue;
+    event.preventDefault();
+    try {
+      const base64 = await readFileAsBase64(file);
+      const relPath = await vaultSaveImage(vaultRoot, file.name, base64);
+      // Drop coordinates → cursor position
+      const pos = view.posAtCoords({
+        x: event.clientX,
+        y: event.clientY,
+      });
+      if (pos !== null) {
+        const alt = file.name.replace(/\.[^.]+$/, "");
+        const imageMd = `![${alt}](${relPath})`;
+        view.dispatch({
+          changes: { from: pos, insert: imageMd },
+        });
+      }
+    } catch (err) {
+      console.error("Failed to drop image:", err);
+    }
+    return true;
+  }
+  return false;
+}
+
+// ── Task list checkbox toggle ───────────────────────────────────────────────
+
+function handleCheckboxToggle(
+  event: MouseEvent,
+  view: EditorView,
+): boolean {
+  const pos = view.posAtCoords({
+    x: event.clientX,
+    y: event.clientY,
+  });
+  if (pos === null) return false;
+
+  const line = view.state.doc.lineAt(pos);
+  const lineText = line.text;
+
+  // Match `- [ ]` or `- [x]` at the start of a line
+  const uncheckedMatch = lineText.match(/^(\s*[-*+] )\[ \]/);
+  const checkedMatch = lineText.match(/^(\s*[-*+] )\[x\]/i);
+
+  if (!uncheckedMatch && !checkedMatch) return false;
+
+  // Only toggle when clicking near the checkbox brackets
+  const lineStart = line.from;
+  const bracketStart = lineStart + (uncheckedMatch?.[1].length ?? checkedMatch![1].length);
+  const bracketEnd = bracketStart + 3;
+  if (pos < bracketStart || pos > bracketEnd) return false;
+
+  event.preventDefault();
+
+  if (uncheckedMatch) {
+    view.dispatch({
+      changes: {
+        from: lineStart + uncheckedMatch[1].length,
+        to: lineStart + uncheckedMatch[1].length + 3,
+        insert: "[x]",
+      },
+    });
+  } else if (checkedMatch) {
+    view.dispatch({
+      changes: {
+        from: lineStart + checkedMatch[1].length,
+        to: lineStart + checkedMatch[1].length + 3,
+        insert: "[ ]",
+      },
+    });
+  }
+  return true;
+}
+
 function makeExtensions(
   onChange: (body: string) => void,
   onBlur: (() => void) | undefined,
   onGlobalSearch: ((selection: string) => void) | undefined,
   readOnly: boolean,
+  vaultRoot: string | null | undefined,
 ) {
   return [
     history(),
@@ -117,7 +256,7 @@ function makeExtensions(
       ...historyKeymap,
     ]),
     search({ top: true }),
-    markdown(),
+    markdown({ extensions: [GFM] }),
     syntaxHighlighting(markdownHighlightStyle),
     EditorView.lineWrapping,
     EditorView.editable.of(!readOnly),
@@ -134,6 +273,25 @@ function makeExtensions(
         onBlur?.();
         return false;
       },
+      paste(event, view) {
+        if (readOnly || !vaultRoot) return false;
+        // Fire-and-forget: return true immediately, process async
+        handleImagePaste(event, view, vaultRoot).catch((err) =>
+          console.error("paste image:", err),
+        );
+        return true;
+      },
+      drop(event, view) {
+        if (readOnly || !vaultRoot) return false;
+        handleImageDrop(event, view, vaultRoot).catch((err) =>
+          console.error("drop image:", err),
+        );
+        return true;
+      },
+      mousedown(event, view) {
+        if (readOnly) return false;
+        return handleCheckboxToggle(event, view);
+      },
     }),
   ];
 }
@@ -148,6 +306,7 @@ export function Editor(props: EditorProps) {
     conflict,
     onReload,
     onGlobalSearch,
+    vaultRoot,
   } = props;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -158,6 +317,8 @@ export function Editor(props: EditorProps) {
   const onGlobalSearchRef = useRef(onGlobalSearch);
   onGlobalSearchRef.current = onGlobalSearch;
   const lastNoteIdRef = useRef<string | null>(null);
+  const vaultRootRef = useRef(vaultRoot);
+  vaultRootRef.current = vaultRoot;
 
   // Mount / tear down the view.
   useEffect(() => {
@@ -171,6 +332,7 @@ export function Editor(props: EditorProps) {
           () => onBlurRef.current?.(),
           (selection) => onGlobalSearchRef.current?.(selection),
           !!readOnly,
+          vaultRootRef.current,
         ),
       }),
     });
@@ -222,6 +384,7 @@ export function Editor(props: EditorProps) {
           () => onBlurRef.current?.(),
           (selection) => onGlobalSearchRef.current?.(selection),
           !!readOnly,
+          vaultRootRef.current,
         ),
       }),
     );
