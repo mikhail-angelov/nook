@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { EventsOn } from "../../../wailsjs/runtime/runtime";
 
 interface QuickNoteDialogProps {
   vaultRoot: string | null;
@@ -16,9 +15,14 @@ export function QuickNoteDialog({ vaultRoot, onSave }: QuickNoteDialogProps) {
     let unlisten: (() => void) | undefined;
 
     void (async () => {
-      unlisten = await EventsOn("hotkey://quick-note", () => {
-        setOpen(true);
-      });
+      try {
+        const { EventsOn } = await import("../../../wailsjs/runtime/runtime");
+        unlisten = await EventsOn("hotkey://quick-note", () => {
+          setOpen(true);
+        });
+      } catch {
+        // Wails runtime not available (e.g. in test environment)
+      }
     })();
 
     return () => {
