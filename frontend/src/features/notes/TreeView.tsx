@@ -68,10 +68,10 @@ export function TreeView({
               {editingNoteId === node.id ? (
                 <input
                   type="text"
-                  value={editingName}
+                  value={editingName ?? ""}
                   onChange={(e) => onEditChange(e.target.value)}
                   onBlur={onEditBlur}
-                  onKeyDown={onEditKeyDown}
+                  onKeyDown={onEditKeyDown as (event: React.KeyboardEvent<HTMLInputElement>) => void}
                   className="flex-1 bg-transparent outline-none"
                   autoFocus
                 />
@@ -100,10 +100,10 @@ export function TreeView({
               {editingNoteId === node.id ? (
                 <input
                   type="text"
-                  value={editingName}
+                  value={editingName ?? ""}
                   onChange={(e) => onEditChange(e.target.value)}
                   onBlur={onEditBlur}
-                  onKeyDown={onEditKeyDown}
+                  onKeyDown={onEditKeyDown as (event: React.KeyboardEvent<HTMLInputElement>) => void}
                   className="flex-1 bg-transparent outline-none"
                   autoFocus
                 />

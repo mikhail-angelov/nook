@@ -440,7 +440,7 @@ export function NotesPanel({
       <aside className="flex min-h-0 flex-col border-r border-sidebar-border bg-sidebar">
         <div className="border-b border-sidebar-border px-3 py-2">
           <div className="flex items-center justify-between">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-sidebar-foreground/60">
+            <div className="text-xs font-semibold uppercase tracking-[0.15em] text-sidebar-foreground/60">
               Files
             </div>
             <div className="flex items-center gap-1">
@@ -521,7 +521,7 @@ export function NotesPanel({
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                className="rounded px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
                 onClick={renameSelectedNote}
                 disabled={!activeNote}
               >
@@ -529,7 +529,7 @@ export function NotesPanel({
               </button>
               <button
                 type="button"
-                className="rounded px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
                 onClick={deleteSelectedNote}
                 disabled={!activeNote}
               >
@@ -537,7 +537,7 @@ export function NotesPanel({
               </button>
               <button
                 type="button"
-                className="rounded px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
                 onClick={makeSelectedNoteSecure}
                 disabled={!activeNote || activeNote?.isSecure}
               >
