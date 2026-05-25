@@ -1,5 +1,4 @@
 import { useCallback } from "react";
-import type { Note } from "@/features/vault/notes";
 
 export type TabItem = {
   id: string;

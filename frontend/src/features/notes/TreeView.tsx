@@ -14,10 +14,10 @@ interface TreeViewProps {
   onSelectNote: (noteId: string) => void;
   onStartEdit: (nodeId: string, currentPath: string) => void;
   editingNoteId: string | null;
-  editingName: string;
-  onEditChange: (name: string) => void;
+  editingName: string | null;
+  onEditChange: (name: string | null) => void;
   onEditBlur: () => void;
-  onEditKeyDown: (event: React.KeyboardEvent) => void;
+  onEditKeyDown: (event: React.KeyboardEvent<Element>) => void;
 }
 
 export function TreeView({

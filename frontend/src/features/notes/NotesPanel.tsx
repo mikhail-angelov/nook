@@ -348,7 +348,7 @@ export function NotesPanel({
       if (!unlocked) return;
     }
     try {
-      const secured = await makeNoteSecure(root, activeNote.id);
+      const secured = await makeNoteSecure(activeNote.id, root, activeNote.body ?? "");
       commitNote(secured, { previousId: activeNote.id });
     } catch (error) {
       setStatus(

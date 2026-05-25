@@ -23,7 +23,6 @@ import { Header } from "@/components/Header";
 import { NotesPanel } from "@/features/notes/NotesPanel";
 import { MODE } from "@/lib/utils";
 import { QuickNoteDialog } from "@/features/quicknote/QuickNoteDialog";
-import type { Settings } from "../../wailsjs/go/models";
 
 export default function App() {
   const [promptApi, promptModal] = usePromptDialog();

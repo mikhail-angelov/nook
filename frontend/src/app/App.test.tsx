@@ -232,8 +232,8 @@ describe("App vault shell", () => {
     deleteNote.mockReset().mockImplementation(async (root: string, id: string) => {
       // no-op
     });
-    makeNoteSecure.mockReset().mockImplementation(async (root: string, id: string) =>
-      makeNote(`${id}.sec`, "Alpha secured", "Alpha body\n", {
+    makeNoteSecure.mockReset().mockImplementation(async (id: string, _root: string, body: string) =>
+      makeNote(`${id}.sec`, "Alpha secured", body, {
         path: `${id}.sec`,
         isSecure: true,
         mtime: 501,
@@ -551,8 +551,9 @@ describe("App vault shell", () => {
     await waitFor(() => {
       expect(vaultUnlockSecure).toHaveBeenCalledWith("/vault", "vault-password");
       expect(makeNoteSecure).toHaveBeenCalledWith(
-        "/vault",
         "notes/a.md",
+        "/vault",
+        "Alpha body\n",
       );
     });
     expect(screen.getByTestId("editor-note")).toHaveTextContent("notes/a.md.sec");
