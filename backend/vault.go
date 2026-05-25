@@ -1,9 +1,13 @@
 package backend
 
 import (
+	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"time"
 )
 
 func ScanVault(root string) ([]ScannedNote, error) {
@@ -66,6 +70,54 @@ func WriteFile(root string, relPath string, contents string) (int64, error) {
 		return 0, err
 	}
 	return info.ModTime().Unix(), nil
+}
+
+// allowedImageExt maps lowercase image extensions to whether they're supported.
+var allowedImageExt = map[string]bool{
+	".png":  true,
+	".jpg":  true,
+	".jpeg": true,
+	".gif":  true,
+	".webp": true,
+	".svg":  true,
+}
+
+// SaveImageFile decodes a base64-encoded image and saves it to <root>/assets/<timestamped-filename>.
+// Returns the relative path (e.g. "assets/2026-05-25_18-00-00.png").
+func SaveImageFile(root string, filename string, base64Data string) (string, error) {
+	ext := strings.ToLower(filepath.Ext(filename))
+	if !allowedImageExt[ext] {
+		return "", fmt.Errorf("unsupported image format: %s", ext)
+	}
+
+	// Decode base64 data (supports both raw and data-URL format)
+	if idx := strings.Index(base64Data, ","); idx >= 0 {
+		base64Data = base64Data[idx+1:]
+	}
+
+	data, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		return "", fmt.Errorf("decode image data: %w", err)
+	}
+
+	if len(data) == 0 {
+		return "", fmt.Errorf("empty image data")
+	}
+
+	// Generate a timestamped filename
+	ts := time.Now().Format("2006-01-02_15-04-05")
+	relPath := fmt.Sprintf("assets/%s%s", ts, ext)
+
+	absPath, err := SafeVaultPath(root, relPath)
+	if err != nil {
+		return "", err
+	}
+
+	if err := atomicWriteFile(absPath, data); err != nil {
+		return "", fmt.Errorf("write image file: %w", err)
+	}
+
+	return relPath, nil
 }
 
 func DeleteFile(root string, relPath string) error {

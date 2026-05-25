@@ -504,6 +504,7 @@ export function NotesPanel({
                 void reloadSelectedNote();
               }}
               onGlobalSearch={focusGlobalSearch}
+              vaultRoot={root}
             />
           ) : (
             <div className="flex h-full items-center justify-center p-8">
