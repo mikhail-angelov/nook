@@ -86,5 +86,5 @@ jobs:
       run: npm run build
 
     - name: Build Wails binary
-      run: wails build
+      run: xvfb-run wails build
 
