@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { EventsOn } from "@/../wailsjs/runtime/runtime";
+import { EventsOn } from "../../../wailsjs/runtime/runtime";
 
 interface QuickNoteDialogProps {
   vaultRoot: string | null;
