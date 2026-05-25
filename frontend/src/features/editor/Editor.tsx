@@ -79,13 +79,13 @@ const markdownHighlightStyle = HighlightStyle.define([
 const editorTheme = EditorView.theme({
   "&": {
     height: "100%",
-    fontSize: "1rem",
+    fontSize: "0.9375rem",           /* 15px — Obsidian default editor font */
   },
   ".cm-scroller": {
     fontFamily:
-      'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
-    lineHeight: "1.6",
-    padding: "1rem 1.25rem",
+      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif',
+    lineHeight: "1.65",
+    padding: "1.5rem 2rem",
   },
   ".cm-content": {
     maxWidth: "56rem",

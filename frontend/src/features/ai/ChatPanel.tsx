@@ -455,12 +455,12 @@ export function ChatPanel({
               <button
                 type="button"
                 onClick={startNewChat}
-                className="rounded border border-border px-2 py-1 text-[11px] hover:bg-muted"
+                className="rounded border border-border px-2 py-1 text-xxs hover:bg-muted"
               >
                 New chat
               </button>
             </div>
-            <div className="mt-1 text-[11px] text-muted-foreground">
+            <div className="mt-1 text-xxs text-muted-foreground">
               {loadingSessions
                 ? "Loading…"
                 : `${visibleSessions.length} session${visibleSessions.length === 1 ? "" : "s"}`}
@@ -483,7 +483,7 @@ export function ChatPanel({
                       title={session.id}
                     >
                       <div className="truncate">{session.title}</div>
-                      <div className="truncate text-[10px] text-muted-foreground">
+                      <div className="truncate text-xxxs text-muted-foreground">
                         {session.provider} · {session.model}
                       </div>
                     </button>
@@ -624,7 +624,7 @@ export function ChatPanel({
                         : "border-border bg-muted/30"
                     }`}
                   >
-                    <div className="mb-1 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                    <div className="mb-1 text-xxxs uppercase tracking-[0.2em] text-muted-foreground">
                       {message.role}
                     </div>
                     <div className="whitespace-pre-wrap">{message.content}</div>
@@ -632,7 +632,7 @@ export function ChatPanel({
                 ))}
                 {sending && messages[messages.length - 1]?.role !== "assistant" ? (
                   <div className="max-w-3xl rounded border border-border bg-muted/30 px-3 py-2 text-sm">
-                    <div className="mb-1 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                    <div className="mb-1 text-xxxs uppercase tracking-[0.2em] text-muted-foreground">
                       assistant
                     </div>
                     <div>Streaming…</div>

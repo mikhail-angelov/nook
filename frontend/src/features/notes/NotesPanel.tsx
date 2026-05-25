@@ -20,6 +20,7 @@ import { useAutosave } from "@/features/editor/useAutosave";
 import { useNoteBuffer } from "@/features/editor/useNoteBuffer";
 import { Editor } from "@/features/editor/Editor";
 import { PromptApi } from "@/components/PromptDialog";
+import { TabBar, type TabItem } from "@/components/TabBar";
 import { ScannedNote, VaultEvent } from "../vault/types";
 import { TreeView, type TreeNode } from "./TreeView";
 import { resolveSelectedNoteId } from "./selection";
@@ -35,6 +36,9 @@ type NotesPanelProps = {
   removeNote: (id: string) => void;
   openVault: () => Promise<void>;
   vaultEvent: VaultEvent | null;
+  initialNoteId?: string | null;
+  /** Called when the selected note changes — for persistence. */
+  onNoteSelected?: (noteId: string | null) => void;
 };
 
 function toScannedNote(note: Note): ScannedNote {
@@ -50,16 +54,16 @@ function sortNotes(a: ScannedNote, b: ScannedNote): number {
 
 function buildTreeFromNotes(notes: ScannedNote[]): TreeNode[] {
   const root: TreeNode = { id: '', name: '', type: 'folder', children: [] };
-  
+
   for (const note of notes) {
     const parts = note.id.split('/');
     let current = root;
-    
+
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i];
       const isFile = i === parts.length - 1;
       const nodeId = parts.slice(0, i + 1).join('/');
-      
+
       let child = current.children.find(c => c.name === part);
       if (!child) {
         child = {
@@ -74,8 +78,7 @@ function buildTreeFromNotes(notes: ScannedNote[]): TreeNode[] {
       current = child;
     }
   }
-  
-  // Sort folders first, then files, alphabetically
+
   const sortNodes = (nodes: TreeNode[]): TreeNode[] => {
     return nodes.sort((a, b) => {
       if (a.type === 'folder' && b.type === 'file') return -1;
@@ -86,8 +89,28 @@ function buildTreeFromNotes(notes: ScannedNote[]): TreeNode[] {
       children: sortNodes(node.children)
     }));
   };
-  
+
   return sortNodes(root.children);
+}
+
+// ── Tab manager for recently opened documents ───────────────────────────────
+
+const MAX_TABS = 10;
+
+function updateTabs(tabs: TabItem[], noteId: string, notes: ScannedNote[]): TabItem[] {
+  // Already exists → move to end (most recent)
+  const existing = tabs.find((t) => t.id === noteId);
+  if (existing) {
+    const rest = tabs.filter((t) => t.id !== noteId);
+    return [...rest, existing];
+  }
+  // New tab
+  const note = notes.find((n) => n.id === noteId);
+  const title = note?.title ?? noteId.split("/").pop() ?? noteId;
+  const newTab: TabItem = { id: noteId, title };
+  const next = [...tabs, newTab];
+  if (next.length > MAX_TABS) next.shift();
+  return next;
 }
 
 export function NotesPanel({
@@ -99,6 +122,7 @@ export function NotesPanel({
   removeNote,
   openVault,
   vaultEvent,
+  onNoteSelected,
 }: NotesPanelProps) {
   const [requestedSelectedId, setRequestedSelectedId] = useState<string | null>(
     null,
@@ -106,7 +130,9 @@ export function NotesPanel({
   const [searchQuery, setSearchQuery] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [secureUnlocked, setSecureUnlocked] = useState(false);
+  const [tabs, setTabs] = useState<TabItem[]>([]);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const lastSelectedRef = useRef<string | null>(null);
 
   const focusGlobalSearch = useCallback((selection: string) => {
     const input = searchInputRef.current;
@@ -197,6 +223,7 @@ export function NotesPanel({
     selectedId,
     loadSelectedNote,
   });
+
   const activeNote = useMemo(() => {
     if (loadedNote && loadedNote.id === selectedStoreNote?.id) {
       return loadedNote;
@@ -258,9 +285,22 @@ export function NotesPanel({
       if (loadedNote?.id !== noteId) {
         setLoadedNote(null);
       }
+      // Update tabs
+      setTabs((prev) => updateTabs(prev, noteId, notes));
+      // Notify parent for persistence
+      onNoteSelected?.(noteId);
     },
-    [loadedNote?.id, root, setLoadedNote],
+    [root, loadedNote?.id, setLoadedNote, notes, onNoteSelected],
   );
+
+  // Sync tab when selectedId changes externally (e.g. initial load)
+  useEffect(() => {
+    if (selectedId && selectedId !== lastSelectedRef.current) {
+      lastSelectedRef.current = selectedId;
+      setTabs((prev) => updateTabs(prev, selectedId, notes));
+      onNoteSelected?.(selectedId);
+    }
+  }, [selectedId, notes, onNoteSelected]);
 
   const createVaultNote = useCallback(async () => {
     if (!root) return;
@@ -279,6 +319,14 @@ export function NotesPanel({
       await autosave.flush();
       const renamed = await renameNote(oldId, newPath, root);
       commitNote(renamed, { previousId: oldId });
+      // Update tab title
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === oldId
+            ? { ...t, id: renamed.id, title: renamed.title }
+            : t,
+        ),
+      );
     },
     [autosave, commitNote, root],
   );
@@ -299,50 +347,55 @@ export function NotesPanel({
       const unlocked = await unlockSecureVault(root);
       if (!unlocked) return;
     }
-    const secured = await makeNoteSecure(
-      activeNote.id,
-      root,
-      noteBuffer.draft ?? activeNote.body ?? "",
-    );
-    commitNote(secured, { previousId: activeNote.id });
-  }, [
-    activeNote,
-    autosave,
-    commitNote,
-    noteBuffer.draft,
-    root,
-    secureUnlocked,
-    unlockSecureVault,
-  ]);
+    try {
+      const secured = await makeNoteSecure(activeNote.id, root, activeNote.body ?? "");
+      commitNote(secured, { previousId: activeNote.id });
+    } catch (error) {
+      setStatus(
+        error instanceof Error ? error.message : "Failed to secure note",
+      );
+    }
+  }, [activeNote, autosave, commitNote, promptApi, root, secureUnlocked, unlockSecureVault]);
 
   const deleteSelectedNote = useCallback(async () => {
     if (!root || !activeNote) return;
-    const confirmed = await promptApi.confirm(`Delete "${activeNote.title}"?`);
-    if (!confirmed) return;
+    const confirm = await promptApi.prompt(
+      `Delete "${activeNote.id}"? Type "yes" to confirm`,
+      {
+        defaultValue: "",
+      },
+    );
+    if (confirm?.toLowerCase() !== "yes") return;
     await autosave.flush();
-    await deleteNote(activeNote.id, root);
+    await deleteNote(root, activeNote.id);
+    setLoadedNote(null);
+    setRequestedSelectedId(null);
+    setTabs((prev) => prev.filter((t) => t.id !== activeNote.id));
     removeNote(activeNote.id);
     removeSearchNote(activeNote.id);
-    const next = notes.find((note) => note.id !== activeNote.id) ?? null;
-    setRequestedSelectedId(next?.id ?? null);
-    setLoadedNote(null);
-  }, [activeNote, autosave, notes, promptApi, removeNote, root, setLoadedNote]);
+  }, [activeNote, autosave, deleteNote, promptApi, removeNote, root, setLoadedNote]);
 
-  const reloadSelectedNote = useCallback(async () => {
-    if (!root || !activeNote) return;
-    await noteBuffer.reloadFromDisk();
-    await refreshActiveNote(activeNote.id, root);
-  }, [activeNote, noteBuffer, refreshActiveNote, root]);
+  const handleNoteClick = useCallback((noteId: string) => {
+    void selectNote(noteId);
+  }, [selectNote]);
+
+  const closeTab = useCallback((tabId: string) => {
+    setTabs((prev) => prev.filter((t) => t.id !== tabId));
+    // If closing active tab, switch to the next one
+    setTabs((prev) => {
+      if (selectedId === tabId && prev.length > 0) {
+        const last = prev[prev.length - 1];
+        // Use setTimeout to avoid state update during render
+        setTimeout(() => selectNote(last.id), 0);
+      }
+      return prev;
+    });
+  }, [selectedId, selectNote]);
 
   const hasNotes = notes.length > 0;
-  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState("");
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
-
-  const treeData = useMemo(() => buildTreeFromNotes(visibleNotes), [visibleNotes]);
-
   const toggleFolder = useCallback((folderId: string) => {
-    setExpandedFolders(prev => {
+    setExpandedFolders((prev) => {
       const next = new Set(prev);
       if (next.has(folderId)) {
         next.delete(folderId);
@@ -353,31 +406,23 @@ export function NotesPanel({
     });
   }, []);
 
-  const handleNoteClick = useCallback((noteId: string) => {
-    void selectNote(noteId);
-  }, [selectNote]);
+  // ── Rename state and handlers ──
 
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState<string | null>(null);
 
-  const handleEditBlur = useCallback(async () => {
-    if (!editingNoteId || !root || editingName === editingNoteId) {
-      setEditingNoteId(null);
-      return;
+  const handleEditBlur = useCallback(() => {
+    if (!editingNoteId || !editingName) return;
+    if (editingName !== editingNoteId) {
+      void performRename(editingNoteId, editingName);
     }
-    try {
-      await performRename(editingNoteId, editingName);
-    } catch (error) {
-      setStatus(
-        error instanceof Error ? error.message : "Failed to rename note",
-      );
-    } finally {
-      setEditingNoteId(null);
-    }
-  }, [editingName, editingNoteId, performRename, root]);
+    setEditingNoteId(null);
+    setEditingName(null);
+  }, [editingNoteId, editingName, performRename]);
 
-  const handleEditKeyDown = useCallback((event: React.KeyboardEvent) => {
+  const handleEditKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') {
-      event.preventDefault();
-      void handleEditBlur();
+      handleEditBlur();
     } else if (event.key === 'Escape') {
       event.preventDefault();
       setEditingNoteId(null);
@@ -390,24 +435,24 @@ export function NotesPanel({
   }, []);
 
   return (
-    <main className="grid min-h-0 flex-1 grid-cols-[19rem_minmax(0,1fr)] gap-0">
-          
-      <aside className="flex min-h-0 flex-col border-r border-black/10 bg-white/60">
-        <div className="border-b border-black/10 px-4 py-3">
-          <div className="flex justify-between items-center">
-            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-              Notes
+    <main className="grid min-h-0 flex-1 grid-cols-[16rem_minmax(0,1fr)] gap-0">
+      {/* ── Sidebar ── */}
+      <aside className="flex min-h-0 flex-col border-r border-sidebar-border bg-sidebar">
+        <div className="border-b border-sidebar-border px-3 py-2">
+          <div className="flex items-center justify-between">
+            <div className="text-xxs font-semibold uppercase tracking-[0.15em] text-sidebar-foreground/60">
+              Files
             </div>
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                className="rounded border border-border p-1 hover:bg-muted disabled:opacity-60"
+                className="rounded p-1 text-sidebar-foreground/50 hover:bg-sidebar-border/50 hover:text-sidebar-foreground disabled:opacity-40"
                 onClick={createVaultNote}
                 disabled={!root}
                 title="New note"
               >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
               </button>
             </div>
@@ -419,21 +464,21 @@ export function NotesPanel({
             onChange={(event) => {
               setSearchQuery(event.target.value);
             }}
-            placeholder="Search notes (⌘⇧F)"
-            className="mt-3 w-full rounded-md border border-black/10 bg-white px-3 py-2 text-sm outline-none ring-0 placeholder:text-muted-foreground"
+            placeholder="Search…"
+            className="mt-2 w-full rounded border border-sidebar-border bg-sidebar/50 px-2 py-1.5 text-xs outline-none ring-0 placeholder:text-sidebar-foreground/40"
           />
         </div>
-        <div className="min-h-0 flex-1 overflow-auto p-2">
+        <div className="min-h-0 flex-1 overflow-auto p-1.5">
           {!hasNotes ? (
-            <div className="rounded-lg border border-dashed border-black/15 bg-white/70 p-4 text-sm text-muted-foreground">
+            <div className="rounded border border-dashed border-sidebar-border/50 p-3 text-xs text-sidebar-foreground/50">
               {root
-                ? "No notes in this vault."
-                : "Open a vault to see your notes."}
+                ? "No notes in this vault"
+                : "Open a vault to get started"}
             </div>
           ) : (
             <>
-              <TreeView 
-                nodes={treeData}
+              <TreeView
+                nodes={visibleNotes.length > 0 ? buildTreeFromNotes(visibleNotes) : []}
                 selectedId={selectedId}
                 expandedFolders={expandedFolders}
                 onToggleFolder={toggleFolder}
@@ -446,7 +491,7 @@ export function NotesPanel({
                 onEditKeyDown={handleEditKeyDown}
               />
               {searchQuery.trim() && visibleNotes.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-black/15 bg-white/70 p-4 text-sm text-muted-foreground">
+                <div className="rounded border border-dashed border-sidebar-border/50 p-3 text-xs text-sidebar-foreground/50">
                   No notes match this search.
                 </div>
               ) : null}
@@ -454,41 +499,53 @@ export function NotesPanel({
           )}
         </div>
       </aside>
-      <section className="flex min-h-0 flex-col">
-        <div className="flex items-center justify-between border-b border-black/10 bg-white/50 px-5 py-3">
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-              Editor
+
+      {/* ── Editor area ── */}
+      <section className="flex min-h-0 flex-col bg-background">
+        {/* Tab bar */}
+        <TabBar
+          tabs={tabs}
+          activeId={activeNote?.id ?? null}
+          onSelect={handleNoteClick}
+          onClose={closeTab}
+        />
+
+        {/* Title bar */}
+        {title ? (
+          <div className="flex items-center justify-between border-b border-border px-4 py-1.5" data-testid="note-title-bar">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-foreground truncate max-w-md">
+                {title}
+              </span>
             </div>
-            <div className="text-sm font-medium">{title}</div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                className="rounded px-2 py-1 text-xxs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                onClick={renameSelectedNote}
+                disabled={!activeNote}
+              >
+                Rename
+              </button>
+              <button
+                type="button"
+                className="rounded px-2 py-1 text-xxs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                onClick={deleteSelectedNote}
+                disabled={!activeNote}
+              >
+                Delete
+              </button>
+              <button
+                type="button"
+                className="rounded px-2 py-1 text-xxs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                onClick={makeSelectedNoteSecure}
+                disabled={!activeNote || activeNote?.isSecure}
+              >
+                Secure
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="rounded-md border border-black/10 bg-white px-3 py-2 text-sm hover:bg-black/5 disabled:opacity-60"
-              onClick={renameSelectedNote}
-              disabled={!activeNote}
-            >
-              Rename note
-            </button>
-            <button
-              type="button"
-              className="rounded-md border border-black/10 bg-white px-3 py-2 text-sm hover:bg-black/5 disabled:opacity-60"
-              onClick={deleteSelectedNote}
-              disabled={!activeNote}
-            >
-              Delete note
-            </button>
-            <button
-              type="button"
-              className="rounded-md border border-black/10 bg-white px-3 py-2 text-sm hover:bg-black/5 disabled:opacity-60"
-              onClick={makeSelectedNoteSecure}
-              disabled={!activeNote || activeNote?.isSecure}
-            >
-              Make secure
-            </button>
-          </div>
-        </div>
+        ) : null}
 
         <div className="min-h-0 flex-1">
           {root && activeNote ? (
@@ -501,26 +558,26 @@ export function NotesPanel({
               }}
               conflict={noteBuffer.conflict}
               onReload={() => {
-                void reloadSelectedNote();
+                void refreshActiveNote(activeNote.id, root);
               }}
               onGlobalSearch={focusGlobalSearch}
               vaultRoot={root}
             />
           ) : (
             <div className="flex h-full items-center justify-center p-8">
-              <div className="max-w-md rounded-2xl border border-black/10 bg-white/80 p-8 text-center shadow-sm">
-                <h2 className="text-lg font-semibold">
+              <div className="max-w-md rounded border border-border bg-card p-8 text-center">
+                <h2 className="text-base font-semibold">
                   {root ? "Pick a note" : "Open a vault"}
                 </h2>
-                <p className="mt-2 text-sm text-muted-foreground">
+                <p className="mt-2 text-xs text-muted-foreground">
                   {root
-                    ? "Select a note from the sidebar to start editing it."
-                    : "Choose a folder to scan markdown notes and start the watcher."}
+                    ? "Select a note from the sidebar to start editing."
+                    : "Choose a folder to scan markdown notes."}
                 </p>
                 {!root ? (
                   <button
                     type="button"
-                    className="mt-5 rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-black/90"
+                    className="mt-4 rounded bg-foreground px-4 py-1.5 text-xs font-medium text-background hover:bg-foreground/90"
                     onClick={openVault}
                   >
                     Choose folder
@@ -530,16 +587,25 @@ export function NotesPanel({
             </div>
           )}
         </div>
+
+        {/* Status bar */}
+        {(status || parentStatus) ? (
+          <div className="border-t border-border bg-muted/50 px-4 py-1.5 text-xs text-destructive">
+            {status || parentStatus}
+          </div>
+        ) : noteBuffer.conflict ? (
+          <div className="border-t border-border bg-muted/50 px-4 py-1.5 text-xs text-amber-600">
+            File changed on disk.{' '}
+            <button
+              type="button"
+              className="underline hover:no-underline"
+              onClick={() => activeNote && refreshActiveNote(activeNote.id, root)}
+            >
+              Reload
+            </button>
+          </div>
+        ) : null}
       </section>
-      {(status||parentStatus) ? (
-        <div className="border-t border-black/10 bg-amber-50 px-6 py-3 text-sm text-amber-900">
-          {status || parentStatus}
-        </div>
-      ) : noteBuffer.conflict ? (
-        <div className="border-t border-black/10 bg-amber-50 px-6 py-3 text-sm text-amber-900">
-          File changed on disk. Reload or keep editing to preserve your draft.
-        </div>
-      ) : null}
     </main>
   );
 }

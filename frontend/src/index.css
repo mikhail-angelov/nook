@@ -4,48 +4,83 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Obsidian-inspired light theme */
+    --background: 40 20% 97%;       /* #f7f5f2 — warm off-white */
+    --foreground: 40 10% 12%;       /* #22211e — near-black with warmth */
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 40 10% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
+    --popover-foreground: 40 10% 12%;
+    --primary: 40 10% 12%;
+    --primary-foreground: 40 20% 97%;
+
+    /* Sidebar — distinctly different from editor area */
+    --sidebar: 40 15% 94%;          /* #f0ede8 — slightly darker warm gray */
+    --sidebar-foreground: 40 10% 20%;
+    --sidebar-border: 40 12% 88%;   /* #e0dbd4 */
+
+    --secondary: 40 15% 94%;
+    --secondary-foreground: 40 10% 20%;
+
+    /* Muted — for title text, labels, search input bg */
+    --muted: 40 12% 90%;            /* #e6e2db */
+    --muted-foreground: 40 10% 45%; /* #7a766e */
+
+    --accent: 210 90% 55%;          /* #3b82f6 — blue accent like Obsidian links */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Borders — very subtle */
+    --border: 40 12% 88%;           /* #e0dbd4 */
+    --input: 40 12% 88%;
+    --ring: 210 90% 55%;
+
+    /* Tab bar */
+    --tab-active-bg: 0 0% 100%;
+    --tab-inactive-bg: 40 12% 90%;
+    --tab-border: 40 12% 88%;
+
+    --radius: 0px;                  /* Obsidian uses sharp corners */
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    /* Obsidian-inspired dark theme */
+    --background: 0 0% 12%;         /* #1f1f1f — editor bg */
+    --foreground: 0 0% 85%;         /* #d9d9d9 */
+    --card: 0 0% 15%;               /* #272727 */
+    --card-foreground: 0 0% 85%;
+    --popover: 0 0% 15%;
+    --popover-foreground: 0 0% 85%;
+    --primary: 0 0% 85%;
+    --primary-foreground: 0 0% 12%;
+
+    /* Sidebar — Obsidian dark sidebar */
+    --sidebar: 0 0% 9%;             /* #181818 */
+    --sidebar-foreground: 0 0% 70%;
+    --sidebar-border: 0 0% 16%;     /* #2a2a2a */
+
+    --secondary: 0 0% 15%;
+    --secondary-foreground: 0 0% 85%;
+
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 50%;
+    --accent: 210 85% 60%;          /* #5b9cf5 */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 16%;
+    --input: 0 0% 16%;
+    --ring: 210 85% 60%;
+
+    --tab-active-bg: 0 0% 15%;
+    --tab-inactive-bg: 0 0% 10%;
+    --tab-border: 0 0% 16%;
+
+    --radius: 0px;
   }
 
   * {
@@ -53,18 +88,45 @@
   }
 
   html {
-    /* Scale rem so Tailwind's text-sm (0.875rem, used pervasively in this UI)
-       lands at ~16px. text-xs ~13.7px, text-base ~18.3px. */
-    font-size: 18.29px;
+    /* Obsidian uses ~16px base */
+    font-size: 16px;
   }
 
   body {
     @apply bg-background text-foreground;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto,
+      Oxygen, Ubuntu, Cantarell, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   html,
   body,
   #root {
     height: 100%;
+  }
+
+  /* Scrollbar styling — Obsidian thin scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.25);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.4);
+  }
+
+  /* Selection color */
+  ::selection {
+    background: hsl(var(--accent) / 0.3);
   }
 }
