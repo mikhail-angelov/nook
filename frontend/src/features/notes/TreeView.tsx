@@ -17,7 +17,7 @@ interface TreeViewProps {
   editingName: string | null;
   onEditChange: (name: string | null) => void;
   onEditBlur: () => void;
-  onEditKeyDown: (event: React.KeyboardEvent<Element>) => void;
+  onEditKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
 }
 
 export function TreeView({
