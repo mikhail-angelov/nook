@@ -275,11 +275,18 @@ function makeExtensions(
       },
       paste(event, view) {
         if (readOnly || !vaultRoot) return false;
-        return handleImagePaste(event, view, vaultRoot);
+        // Fire-and-forget: return true immediately, process async
+        handleImagePaste(event, view, vaultRoot).catch((err) =>
+          console.error("paste image:", err),
+        );
+        return true;
       },
       drop(event, view) {
         if (readOnly || !vaultRoot) return false;
-        return handleImageDrop(event, view, vaultRoot);
+        handleImageDrop(event, view, vaultRoot).catch((err) =>
+          console.error("drop image:", err),
+        );
+        return true;
       },
       mousedown(event, view) {
         if (readOnly) return false;

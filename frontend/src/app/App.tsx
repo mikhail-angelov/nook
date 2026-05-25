@@ -141,8 +141,9 @@ export default function App() {
     // Access Wails runtime directly without importing from wailsjs
     // (avoids module resolution failures in test environment)
     const rt =
-      typeof window !== "undefined" &&
-      (window as unknown as { runtime?: { EventsOn?: unknown } }).runtime;
+      typeof window !== "undefined"
+        ? (window as unknown as { runtime?: { EventsOn?: unknown } }).runtime
+        : undefined;
     const wailsEventsOn = rt?.EventsOn as
       | ((event: string, cb: () => void) => Promise<() => void>)
       | undefined;
