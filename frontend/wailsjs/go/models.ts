@@ -56,16 +56,20 @@ export namespace backend {
 	        this.wikilinks = source["wikilinks"];
 	    }
 	}
-	export class Settings {
+export class Settings {
 	    vaultFolder: string;
-	
+	    lastOpenedNote?: string | undefined;
+	    darkMode?: boolean | undefined;
+
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.vaultFolder = source["vaultFolder"];
+	        this.lastOpenedNote = source["lastOpenedNote"];
+	        this.darkMode = source["darkMode"];
 	    }
 	}
 

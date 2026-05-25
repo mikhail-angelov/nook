@@ -9,7 +9,9 @@ import (
 )
 
 type Settings struct {
-	VaultFolder string `json:"vaultFolder"`
+	VaultFolder     string `json:"vaultFolder"`
+	LastOpenedNote  string `json:"lastOpenedNote,omitempty"`
+	DarkMode        bool   `json:"darkMode,omitempty"`
 }
 
 const (
