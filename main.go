@@ -11,9 +11,12 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed assets/icons/appicon.png
+var trayIconBytes []byte
+
 func main() {
-	// Create an instance of the app structure
-	app := NewApp()
+	// Create an instance of the app structure with the tray icon
+	app := NewApp(trayIconBytes)
 
 	// Create application with options
 	err := wails.Run(&options.App{
@@ -21,6 +24,7 @@ func main() {
 		Width:             1024,
 		Height:            768,
 		HideWindowOnClose: true,
+		StartHidden:       true,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
