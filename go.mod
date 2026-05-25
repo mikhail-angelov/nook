@@ -3,6 +3,7 @@ module nook
 go 1.23.0
 
 require (
+	golang.design/x/hotkey v1.0.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/wailsapp/wails/v2 v2.12.0
 	github.com/zalando/go-keyring v0.2.8

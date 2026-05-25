@@ -15,11 +15,13 @@ type App struct {
 	ctx     context.Context
 	watcher *backend.WatcherManager
 	secure  *backend.SecureVaultManager
+	hotkey  *backend.HotkeyManager
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
 	app := &App{secure: backend.NewSecureVaultManager()}
+	app.hotkey = backend.NewHotkeyManager()
 	app.watcher = backend.NewWatcherManager(func(event backend.VaultEvent) {
 		if app.ctx != nil {
 			runtime.EventsEmit(app.ctx, "vault://event", event)
@@ -32,9 +34,15 @@ func NewApp() *App {
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	if err := a.hotkey.Start(ctx); err != nil {
+		runtime.LogWarning(ctx, fmt.Sprintf("hotkey: %v", err))
+	}
 }
 
 func (a *App) shutdown(_ context.Context) {
+	if a.hotkey != nil {
+		_ = a.hotkey.Stop()
+	}
 	if a.watcher != nil {
 		_ = a.watcher.Stop()
 	}

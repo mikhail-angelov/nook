@@ -14,6 +14,7 @@ import {
   vaultScan,
   vaultStartWatching,
   vaultStopWatching,
+  vaultWriteFile,
 } from "@/features/vault/api";
 import { getSettings, updateSettings } from "@/features/settings/api";
 import { useVaultStore } from "@/features/vault/store";
@@ -21,6 +22,7 @@ import type { VaultEvent } from "@/features/vault/types";
 import { Header } from "@/components/Header";
 import { NotesPanel } from "@/features/notes/NotesPanel";
 import { MODE } from "@/lib/utils";
+import { QuickNoteDialog } from "@/features/quicknote/QuickNoteDialog";
 
 export default function App() {
   const [promptApi, promptModal] = usePromptDialog();
@@ -160,6 +162,16 @@ export default function App() {
         )}
 
       {promptModal}
+
+      <QuickNoteDialog
+        vaultRoot={root}
+        onSave={async (note) => {
+          if (!root) return;
+          const path = `quick-notes/${note.title}.md`;
+          await vaultWriteFile(root, path, note.content);
+          await hydrateVault(root);
+        }}
+      />
     </div>
   );
 }
