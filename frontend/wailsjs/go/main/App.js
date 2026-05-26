@@ -86,6 +86,10 @@ export function VaultRenameFile(arg1, arg2, arg3) {
   return window['go']['main']['App']['VaultRenameFile'](arg1, arg2, arg3);
 }
 
+export function VaultSaveImage(arg1, arg2, arg3) {
+  return window['go']['main']['App']['VaultSaveImage'](arg1, arg2, arg3);
+}
+
 export function VaultScan(arg1) {
   return window['go']['main']['App']['VaultScan'](arg1);
 }
@@ -100,8 +104,4 @@ export function VaultStopWatching() {
 
 export function VaultWriteFile(arg1, arg2, arg3) {
   return window['go']['main']['App']['VaultWriteFile'](arg1, arg2, arg3);
-}
-
-export function VaultSaveImage(arg1, arg2, arg3) {
-  return window['go']['main']['App']['VaultSaveImage'](arg1, arg2, arg3);
 }

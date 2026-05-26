@@ -44,6 +44,8 @@ export function VaultReadFile(arg1:string,arg2:string):Promise<string>;
 
 export function VaultRenameFile(arg1:string,arg2:string,arg3:string):Promise<backend.ScannedNote>;
 
+export function VaultSaveImage(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function VaultScan(arg1:string):Promise<Array<backend.ScannedNote>>;
 
 export function VaultStartWatching(arg1:string):Promise<void>;
@@ -51,5 +53,3 @@ export function VaultStartWatching(arg1:string):Promise<void>;
 export function VaultStopWatching():Promise<void>;
 
 export function VaultWriteFile(arg1:string,arg2:string,arg3:string):Promise<number>;
-
-export function VaultSaveImage(arg1:string,arg2:string,arg3:string):Promise<string>;
