@@ -13,16 +13,20 @@ import {
 } from "@/features/vault/notes";
 import {
   removeSearchNote,
+  restoreSearchIndex,
   upsertSearchNote,
 } from "@/features/search/search";
-import { vaultUnlockSecure } from "@/features/vault/api";
+import { vaultRenameFile, vaultScan, vaultUnlockSecure } from "@/features/vault/api";
 import { useAutosave } from "@/features/editor/useAutosave";
 import { useNoteBuffer } from "@/features/editor/useNoteBuffer";
 import { Editor } from "@/features/editor/Editor";
+import type { EditorView } from "@codemirror/view";
 import { PromptApi } from "@/components/PromptDialog";
 import { TabBar, type TabItem } from "@/components/TabBar";
 import { ScannedNote, VaultEvent } from "../vault/types";
 import { TreeView, type TreeNode } from "./TreeView";
+import { useVaultStore } from "@/features/vault/store";
+import { NoteToolbar } from "./NoteToolbar";
 import { resolveSelectedNoteId } from "./selection";
 import { useSelectedNoteLoader } from "./useSelectedNoteLoader";
 import { resolveVisibleNotes } from "./visibleNotes";
@@ -98,19 +102,21 @@ function buildTreeFromNotes(notes: ScannedNote[]): TreeNode[] {
 const MAX_TABS = 10;
 
 function updateTabs(tabs: TabItem[], noteId: string, notes: ScannedNote[]): TabItem[] {
-  // Already exists → move to end (most recent)
-  const existing = tabs.find((t) => t.id === noteId);
-  if (existing) {
-    const rest = tabs.filter((t) => t.id !== noteId);
-    return [...rest, existing];
-  }
-  // New tab
+  // Already open → stay in place (no reorder)
+  if (tabs.some((t) => t.id === noteId)) return tabs;
+  // New tab → insert at front so it's immediately visible
   const note = notes.find((n) => n.id === noteId);
   const title = note?.title ?? noteId.split("/").pop() ?? noteId;
   const newTab: TabItem = { id: noteId, title };
-  const next = [...tabs, newTab];
-  if (next.length > MAX_TABS) next.shift();
+  const next = [newTab, ...tabs];
+  if (next.length > MAX_TABS) next.pop();
   return next;
+}
+
+function bringTabToFront(tabs: TabItem[], noteId: string): TabItem[] {
+  const existing = tabs.find((t) => t.id === noteId);
+  if (!existing) return tabs;
+  return [existing, ...tabs.filter((t) => t.id !== noteId)];
 }
 
 export function NotesPanel({
@@ -124,6 +130,9 @@ export function NotesPanel({
   vaultEvent,
   onNoteSelected,
 }: NotesPanelProps) {
+  const ingestScan = useVaultStore((state) => state.ingestScan);
+  const editorViewRef = useRef<EditorView | null>(null);
+
   const [requestedSelectedId, setRequestedSelectedId] = useState<string | null>(
     null,
   );
@@ -132,6 +141,7 @@ export function NotesPanel({
   const [secureUnlocked, setSecureUnlocked] = useState(false);
   const [tabs, setTabs] = useState<TabItem[]>([]);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const sidebarRef = useRef<HTMLElement | null>(null);
   const lastSelectedRef = useRef<string | null>(null);
 
   const focusGlobalSearch = useCallback((selection: string) => {
@@ -231,7 +241,6 @@ export function NotesPanel({
     return selectedStoreNote ? scannedToNote(selectedStoreNote) : null;
   }, [loadedNote, selectedStoreNote]);
   const noteBuffer = useNoteBuffer(activeNote, root, vaultEvent);
-  const title = activeNote?.title ?? selectedStoreNote?.title ?? null;
   const commitNote = useCallback(
     (
       note: Note,
@@ -282,15 +291,28 @@ export function NotesPanel({
     async (noteId: string) => {
       if (!root) return;
       setRequestedSelectedId(noteId);
-      if (loadedNote?.id !== noteId) {
-        setLoadedNote(null);
-      }
-      // Update tabs
-      setTabs((prev) => updateTabs(prev, noteId, notes));
-      // Notify parent for persistence
+      if (loadedNote?.id !== noteId) setLoadedNote(null);
+      setTabs((prev) =>
+        // Sidebar click: if the tab already exists (even in overflow) bring it to the
+        // front so it's immediately visible; otherwise add it as a new first tab.
+        prev.some((t) => t.id === noteId)
+          ? bringTabToFront(prev, noteId)
+          : updateTabs(prev, noteId, notes),
+      );
       onNoteSelected?.(noteId);
     },
     [root, loadedNote?.id, setLoadedNote, notes, onNoteSelected],
+  );
+
+  // Tab-bar click: just activate — the tab stays exactly where it is.
+  const handleTabBarClick = useCallback(
+    (noteId: string) => {
+      if (!root) return;
+      setRequestedSelectedId(noteId);
+      if (loadedNote?.id !== noteId) setLoadedNote(null);
+      onNoteSelected?.(noteId);
+    },
+    [root, loadedNote?.id, setLoadedNote, onNoteSelected],
   );
 
   // Sync tab when selectedId changes externally (e.g. initial load)
@@ -380,17 +402,30 @@ export function NotesPanel({
   }, [selectNote]);
 
   const closeTab = useCallback((tabId: string) => {
-    setTabs((prev) => prev.filter((t) => t.id !== tabId));
-    // If closing active tab, switch to the next one
     setTabs((prev) => {
-      if (selectedId === tabId && prev.length > 0) {
-        const last = prev[prev.length - 1];
-        // Use setTimeout to avoid state update during render
+      const next = prev.filter((t) => t.id !== tabId);
+      if (selectedId === tabId && next.length > 0) {
+        const last = next[next.length - 1];
         setTimeout(() => selectNote(last.id), 0);
       }
-      return prev;
+      return next;
     });
   }, [selectedId, selectNote]);
+
+  const closeAllTabs = useCallback(() => {
+    setTabs((prev) => (activeNote ? prev.filter((t) => t.id === activeNote.id) : []));
+  }, [activeNote]);
+
+  const selectNoteFromOverflow = useCallback(
+    async (noteId: string) => {
+      if (!root) return;
+      setRequestedSelectedId(noteId);
+      if (loadedNote?.id !== noteId) setLoadedNote(null);
+      setTabs((prev) => bringTabToFront(prev, noteId));
+      onNoteSelected?.(noteId);
+    },
+    [root, loadedNote?.id, setLoadedNote, onNoteSelected],
+  );
 
   const hasNotes = notes.length > 0;
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
@@ -410,34 +445,84 @@ export function NotesPanel({
 
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<string | null>(null);
+  const [editingNodeType, setEditingNodeType] = useState<'file' | 'folder' | null>(null);
+
+  const performFolderRename = useCallback(
+    async (oldFolderPath: string, newFolderPath: string) => {
+      if (!root) return;
+      try {
+        await vaultRenameFile(root, oldFolderPath, newFolderPath);
+        const scanned = await vaultScan(root);
+        await restoreSearchIndex(root, scanned);
+        ingestScan(scanned);
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : 'Failed to rename folder');
+      }
+    },
+    [root, ingestScan],
+  );
 
   const handleEditBlur = useCallback(() => {
-    if (!editingNoteId || !editingName) return;
-    if (editingName !== editingNoteId) {
-      void performRename(editingNoteId, editingName);
+    if (!editingNoteId || editingName == null) return;
+    const trimmed = editingName.trim();
+    if (trimmed) {
+      const dir = editingNoteId.includes('/')
+        ? editingNoteId.slice(0, editingNoteId.lastIndexOf('/') + 1)
+        : '';
+      const newPath = dir + trimmed;
+      if (newPath !== editingNoteId) {
+        if (editingNodeType === 'folder') {
+          void performFolderRename(editingNoteId, newPath);
+        } else {
+          void performRename(editingNoteId, newPath);
+        }
+      }
     }
     setEditingNoteId(null);
     setEditingName(null);
-  }, [editingNoteId, editingName, performRename]);
+    setEditingNodeType(null);
+  }, [editingNoteId, editingName, editingNodeType, performRename, performFolderRename]);
 
   const handleEditKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') {
+      event.preventDefault();
       handleEditBlur();
     } else if (event.key === 'Escape') {
       event.preventDefault();
       setEditingNoteId(null);
+      setEditingName(null);
     }
   }, [handleEditBlur]);
 
-  const handleStartEdit = useCallback((nodeId: string, currentPath: string) => {
+  const handleStartEdit = useCallback((nodeId: string, currentName: string, type: 'file' | 'folder' = 'file') => {
     setEditingNoteId(nodeId);
-    setEditingName(currentPath);
+    setEditingName(currentName);
+    setEditingNodeType(type);
   }, []);
+
+  // Enter key → start editing the selected note.
+  // Document-level so it fires even after a click moved focus to the editor,
+  // but guarded against firing inside CodeMirror (would swallow newlines).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter') return;
+      if (!selectedId || editingNoteId) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      // Don't intercept while typing inside CodeMirror
+      const target = e.target as HTMLElement;
+      if (target.closest?.('.cm-editor') || target.getAttribute?.('contenteditable')) return;
+      e.preventDefault();
+      const filename = selectedId.split('/').pop() ?? selectedId;
+      handleStartEdit(selectedId, filename);
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [selectedId, editingNoteId, handleStartEdit]);
 
   return (
     <main className="grid min-h-0 flex-1 grid-cols-[16rem_minmax(0,1fr)] gap-0">
       {/* ── Sidebar ── */}
-      <aside className="flex min-h-0 flex-col border-r border-sidebar-border bg-sidebar">
+      <aside ref={sidebarRef} className="flex min-h-0 flex-col border-r border-sidebar-border bg-sidebar">
         <div className="border-b border-sidebar-border px-3 py-2">
           <div className="flex items-center justify-between">
             <div className="text-xxs font-semibold uppercase tracking-[0.15em] text-sidebar-foreground/60">
@@ -506,46 +591,20 @@ export function NotesPanel({
         <TabBar
           tabs={tabs}
           activeId={activeNote?.id ?? null}
-          onSelect={handleNoteClick}
+          onSelect={handleTabBarClick}
+          onSelectFromOverflow={(id) => { void selectNoteFromOverflow(id); }}
           onClose={closeTab}
+          onCloseAll={closeAllTabs}
+          onNewNote={createVaultNote}
         />
 
-        {/* Title bar */}
-        {title ? (
-          <div className="flex items-center justify-between border-b border-border px-4 py-1.5" data-testid="note-title-bar">
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-medium text-foreground truncate max-w-md">
-                {title}
-              </span>
-            </div>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                className="rounded px-2 py-1 text-xxs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
-                onClick={renameSelectedNote}
-                disabled={!activeNote}
-              >
-                Rename
-              </button>
-              <button
-                type="button"
-                className="rounded px-2 py-1 text-xxs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
-                onClick={deleteSelectedNote}
-                disabled={!activeNote}
-              >
-                Delete
-              </button>
-              <button
-                type="button"
-                className="rounded px-2 py-1 text-xxs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
-                onClick={makeSelectedNoteSecure}
-                disabled={!activeNote || activeNote?.isSecure}
-              >
-                Secure
-              </button>
-            </div>
-          </div>
-        ) : null}
+        <NoteToolbar
+          editorViewRef={editorViewRef}
+          activeNote={activeNote}
+          onRename={renameSelectedNote}
+          onDelete={deleteSelectedNote}
+          onMakeSecure={makeSelectedNoteSecure}
+        />
 
         <div className="min-h-0 flex-1">
           {root && activeNote ? (
@@ -562,6 +621,7 @@ export function NotesPanel({
               }}
               onGlobalSearch={focusGlobalSearch}
               vaultRoot={root}
+              editorRef={editorViewRef}
             />
           ) : (
             <div className="flex h-full items-center justify-center p-8">

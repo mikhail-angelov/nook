@@ -143,6 +143,17 @@ func RenameFile(root string, oldRelPath string, newRelPath string) (ScannedNote,
 	if err := os.Rename(oldPath, newPath); err != nil {
 		return ScannedNote{}, err
 	}
+	// Directories can't be read as note files; return a minimal placeholder.
+	if info, err := os.Stat(newPath); err == nil && info.IsDir() {
+		relPath, _ := relativeVaultPath(root, newPath)
+		return ScannedNote{
+			ID:        relPath,
+			Path:      relPath,
+			Title:     filepath.Base(relPath),
+			Tags:      []string{},
+			Wikilinks: []string{},
+		}, nil
+	}
 	return scanNoteFile(root, newPath)
 }
 

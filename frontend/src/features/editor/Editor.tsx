@@ -34,6 +34,8 @@ export type EditorProps = {
   onGlobalSearch?: (selection: string) => void;
   /** Vault root path (required for image drag-and-drop / paste). */
   vaultRoot?: string | null;
+  /** Mutable ref that receives the live EditorView instance (set on mount, cleared on unmount). */
+  editorRef?: { current: EditorView | null };
 };
 
 export function shouldSyncEditorDocument(opts: {
@@ -94,6 +96,18 @@ const editorTheme = EditorView.theme({
   },
   ".cm-line": {
     padding: "0 0",
+  },
+  ".cm-panels": {
+    display: "none !important",
+  },
+  ".cm-searchMatch": {
+    backgroundColor: "rgba(234, 179, 8, 0.35)",
+    outline: "1px solid rgba(234, 179, 8, 0.6)",
+    borderRadius: "2px",
+  },
+  ".cm-searchMatch-selected": {
+    backgroundColor: "rgba(234, 179, 8, 0.75)",
+    outline: "1px solid rgba(234, 179, 8, 0.9)",
   },
 });
 
@@ -255,7 +269,13 @@ function makeExtensions(
       ...defaultKeymap,
       ...historyKeymap,
     ]),
-    search({ top: true }),
+    search({
+      createPanel: () => ({
+        dom: Object.assign(document.createElement("div"), {
+          style: "display:none;height:0;overflow:hidden;",
+        }),
+      }),
+    }),
     markdown({ extensions: [GFM] }),
     syntaxHighlighting(markdownHighlightStyle),
     EditorView.lineWrapping,
@@ -275,7 +295,12 @@ function makeExtensions(
       },
       paste(event, view) {
         if (readOnly || !vaultRoot) return false;
-        // Fire-and-forget: return true immediately, process async
+        const items = event.clipboardData?.items;
+        if (!items) return false;
+        const hasImage = Array.from(items).some(
+          (item) => item.kind === "file" && item.type.startsWith("image/"),
+        );
+        if (!hasImage) return false;
         handleImagePaste(event, view, vaultRoot).catch((err) =>
           console.error("paste image:", err),
         );
@@ -283,6 +308,12 @@ function makeExtensions(
       },
       drop(event, view) {
         if (readOnly || !vaultRoot) return false;
+        const files = event.dataTransfer?.files;
+        if (!files || files.length === 0) return false;
+        const hasImage = Array.from(files).some((f) =>
+          f.type.startsWith("image/"),
+        );
+        if (!hasImage) return false;
         handleImageDrop(event, view, vaultRoot).catch((err) =>
           console.error("drop image:", err),
         );
@@ -307,6 +338,7 @@ export function Editor(props: EditorProps) {
     onReload,
     onGlobalSearch,
     vaultRoot,
+    editorRef,
   } = props;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -319,6 +351,7 @@ export function Editor(props: EditorProps) {
   const lastNoteIdRef = useRef<string | null>(null);
   const vaultRootRef = useRef(vaultRoot);
   vaultRootRef.current = vaultRoot;
+  const editorRefProp = editorRef;
 
   // Mount / tear down the view.
   useEffect(() => {
@@ -338,9 +371,11 @@ export function Editor(props: EditorProps) {
     });
     viewRef.current = view;
     lastNoteIdRef.current = note?.id ?? null;
+    if (editorRefProp) editorRefProp.current = view;
     return () => {
       view.destroy();
       viewRef.current = null;
+      if (editorRefProp) editorRefProp.current = null;
     };
     // We intentionally mount only once; the extensions above are stable
     // (they read from refs). Note switching is handled in the effect below.

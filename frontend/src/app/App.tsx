@@ -19,7 +19,7 @@ import {
 import { getSettings, updateSettings } from "@/features/settings/api";
 import { useVaultStore } from "@/features/vault/store";
 import type { VaultEvent } from "@/features/vault/types";
-import { Header } from "@/components/Header";
+import { Footer } from "@/components/Footer";
 import { NotesPanel } from "@/features/notes/NotesPanel";
 import { MODE } from "@/lib/utils";
 import { QuickNoteDialog } from "@/features/quicknote/QuickNoteDialog";
@@ -221,41 +221,53 @@ export default function App() {
     };
   }, []);
 
+  const toggleDarkMode = useCallback(() => {
+    setDarkMode((d) => {
+      const next = !d;
+      updateSettings({ vaultFolder: root ?? "", darkMode: next }).catch(() => {});
+      return next;
+    });
+  }, [root]);
+
+  // Keep native window title in sync with the open vault
+  useEffect(() => {
+    const title = root ? `nook (${root})` : "nook";
+    document.title = title;
+    try {
+      // @ts-expect-error - Wails runtime injected at build time
+      window.runtime?.WindowSetTitle?.(title);
+    } catch {
+      // runtime not available in dev mode
+    }
+  }, [root]);
+
   return (
     <div className="flex h-screen w-screen flex-col bg-background text-foreground">
-      <Header root={root} loadingVault={loadingVault} openVault={openVault} setMode={setMode} mode={mode} darkMode={darkMode} onToggleDarkMode={() => {
-        setDarkMode((d) => {
-          const next = !d;
-          updateSettings({ vaultFolder: root ?? "", darkMode: next }).catch(() => {});
-          return next;
-        });
-      }} />
-
-        {mode === MODE.NOTES ? (
-          <NotesPanel
-            root={root}
-            status={status}
-            promptApi={promptApi}
-            noteMap={noteMap}
-            upsertNote={upsertNote}
-            removeNote={removeNote}
-            openVault={openVault}
-            vaultEvent={vaultEvent}
-            initialNoteId={initialNoteId}
-            onNoteSelected={handleNoteSelected}
-          />
-        ) : (
-          <ChatPanel
-            vaultRoot={root}
-            resolveProvider={resolveProvider}
-            requestApiKey={requestApiKey}
-            requestExtractPath={async () =>
-              promptApi.prompt("Extract note", {
-                defaultValue: "notes/extracted-chat.md",
-              })
-            }
-          />
-        )}
+      {mode === MODE.NOTES ? (
+        <NotesPanel
+          root={root}
+          status={status}
+          promptApi={promptApi}
+          noteMap={noteMap}
+          upsertNote={upsertNote}
+          removeNote={removeNote}
+          openVault={openVault}
+          vaultEvent={vaultEvent}
+          initialNoteId={initialNoteId}
+          onNoteSelected={handleNoteSelected}
+        />
+      ) : (
+        <ChatPanel
+          vaultRoot={root}
+          resolveProvider={resolveProvider}
+          requestApiKey={requestApiKey}
+          requestExtractPath={async () =>
+            promptApi.prompt("Extract note", {
+              defaultValue: "notes/extracted-chat.md",
+            })
+          }
+        />
+      )}
 
       {promptModal}
 
@@ -267,6 +279,16 @@ export default function App() {
           await vaultWriteFile(root, path, note.content);
           await hydrateVault(root);
         }}
+      />
+
+      <Footer
+        root={root}
+        loadingVault={loadingVault}
+        openVault={openVault}
+        setMode={setMode}
+        mode={mode}
+        darkMode={darkMode}
+        onToggleDarkMode={toggleDarkMode}
       />
     </div>
   );
